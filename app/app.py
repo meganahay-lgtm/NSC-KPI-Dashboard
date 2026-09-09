@@ -60,6 +60,7 @@ suburb_coords = {
     "Bunbury": (-33.3271, 115.6414), "Geraldton": (-28.7742, 114.6142),
     "Kalgoorlie": (-30.7489, 121.4658), "Albany": (-35.0269, 117.8837),
     "Karratha": (-20.7364, 116.8460),
+    "Baldivis": (-32.3360, 115.8220),
     # SA
     "Adelaide": (-34.9285, 138.6007), "Elizabeth": (-34.7181, 138.6689),
     "Marion": (-35.0167, 138.5589), "Mile End": (-34.9280, 138.5729),
@@ -88,12 +89,90 @@ nsc_df["lon"] = nsc_df["Suburb"].map(lambda s: suburb_coords[s][1])
 
 coretex_df = pd.read_excel("data/coretex_equipment_records.xlsx")
 
+st.sidebar.markdown("### Reporting period")
+AS_OF_DATE = pd.Timestamp(st.sidebar.date_input("Reporting period end date", value=pd.Timestamp("2025-12-31")))
+recency_cutoff = AS_OF_DATE - pd.Timedelta(days=60)
+
 nsc_serials = set(nsc_df["Serial Number"])
 coretex_serials = set(coretex_df["Serial Number"])
 missing_from_coretex = nsc_serials - coretex_serials
 missing_from_nsc = coretex_serials - nsc_serials
 asset_match_rate = (len(coretex_serials) - len(missing_from_nsc)) / len(coretex_serials) * 100
 
+# Assets on Coretex but not yet on NSC's register - split by how recently they were installed
+pending_coretex_df = coretex_df[coretex_df["Serial Number"].isin(missing_from_nsc)].copy()
+pending_coretex_df["Asset Type"] = pending_coretex_df["Equipment Type"]
+pending_coretex_df["Store Name"] = pending_coretex_df["Store Reference"]
+pending_coretex_df["lat"] = pending_coretex_df["Suburb"].map(lambda s: suburb_coords[s][0])
+pending_coretex_df["lon"] = pending_coretex_df["Suburb"].map(lambda s: suburb_coords[s][1])
+pending_coretex_df["Installation Date"] = pd.to_datetime(pending_coretex_df["Installation Date"])
+pending_coretex_df["Category"] = pending_coretex_df["Installation Date"].apply(
+    lambda d: "New Asset" if d >= recency_cutoff else "Needs Review"
+)
+new_installs_df = pending_coretex_df[pending_coretex_df["Category"] == "New Asset"]
+needs_review_gap_df = pending_coretex_df[pending_coretex_df["Category"] == "Needs Review"]
+
+# Assets Coretex has marked Inactive (their way of recording decommissioned equipment)
+coretex_status_map = dict(zip(coretex_df["Serial Number"], coretex_df["Status"]))
+coretex_change_date_map = dict(zip(coretex_df["Serial Number"], pd.to_datetime(coretex_df["Status Change Date"])))
+nsc_df["Coretex Status"] = nsc_df["Serial Number"].map(coretex_status_map)
+nsc_df["Status Change Date"] = nsc_df["Serial Number"].map(coretex_change_date_map)
+removed_assets_df = nsc_df[
+    (nsc_df["Coretex Status"] == "Inactive") &
+    (nsc_df["Status Change Date"] >= recency_cutoff)
+].copy()
+
+# Match new installs to removed assets at the same store, to distinguish genuine
+# like-for-like replacements from brand new store openings
+removed_by_store = removed_assets_df.groupby("Store #")["Serial Number"].apply(list).to_dict()
+new_by_store = new_installs_df.groupby("Store Reference")["Serial Number"].apply(list).to_dict()
+
+def find_match(store, other_map, used):
+    for s in other_map.get(store, []):
+        if s not in used:
+            used.add(s)
+            return s
+    return None
+
+used_removed = set()
+new_installs_df = new_installs_df.copy()
+new_installs_df["Match Type"] = "New Store"
+new_installs_df["Matched Removed Serial"] = "-"
+for idx, row in new_installs_df.iterrows():
+    match = find_match(row["Store Reference"], removed_by_store, used_removed)
+    if match:
+        new_installs_df.at[idx, "Match Type"] = "Replacement"
+        new_installs_df.at[idx, "Matched Removed Serial"] = match
+
+used_new = set()
+removed_assets_df = removed_assets_df.copy()
+removed_assets_df["Matched New Serial"] = "-"
+removed_assets_df["Match Type"] = "Unmatched removal"
+for idx, row in removed_assets_df.iterrows():
+    match = find_match(row["Store #"], new_by_store, used_new)
+    if match:
+        removed_assets_df.at[idx, "Matched New Serial"] = match
+        removed_assets_df.at[idx, "Match Type"] = "Replacement"
+
+new_installs_df = new_installs_df.sort_values("Store Reference")
+removed_assets_df = removed_assets_df.sort_values("Store #")
+
+# Assets on NSC's register that don't exist in Coretex's file at all - shouldn't normally happen
+missing_entirely_df = nsc_df[nsc_df["Serial Number"].isin(missing_from_coretex)].copy()
+
+needs_review_combined = pd.concat([
+    needs_review_gap_df.rename(columns={"Equipment Type": "Type", "Store Reference": "Store"})[["Serial Number", "Type", "Store", "State", "Installation Date"]].assign(Reason="On Coretex, not yet on NSC register (2+ months)"),
+    missing_entirely_df.rename(columns={"Asset Make/Model": "Type", "Store Name": "Store"})[["Serial Number", "Type", "Store", "State"]].assign(Reason="Missing from Coretex entirely - unexpected")
+], ignore_index=True)
+
+nsc_df["Category"] = nsc_df["Asset Type"]
+removed_serials_set = set(removed_assets_df["Serial Number"])
+nsc_df.loc[nsc_df["Serial Number"].isin(removed_serials_set), "Category"] = "Removed Asset"
+
+map_df = pd.concat([
+    nsc_df[["Store Name", "State", "Asset Type", "Category", "lat", "lon"]],
+    pending_coretex_df[["Store Name", "State", "Asset Type", "Category", "lat", "lon"]]
+], ignore_index=True)
 section = st.sidebar.radio("Go to", [
     "Upload Files", "Asset Accuracy", "Planned Servicing",
     "Breakdowns-Balers", "Breakdowns-Compactors",
@@ -117,25 +196,67 @@ if section == "Upload Files":
 
 elif section == "Asset Accuracy":
     st.subheader("Asset register accuracy")
-    col1, col2 = st.columns(2)
-    col1.metric("This month", f"{asset_match_rate:.1f}%", delta="+1% vs 2yr avg")
-    col2.metric("2yr average", "95%")
-    dummy_assets = pd.DataFrame({"Status": ["New this month", "Removed this month"], "Count": [8, 0]})
-    st.table(dummy_assets)
+    st.metric("Asset register accuracy", f"{asset_match_rate:.1f}%")
 
-    st.write("All unit locations")
-    fig = px.scatter_geo(
-        nsc_df, lat="lat", lon="lon",
-        hover_name="Store Name",
-        hover_data={"State": True, "Asset Type": True, "lat": False, "lon": False},
-        color="Asset Type", scope="world",
-    )
-    fig.update_geos(
-        lataxis_range=[-45, -9], lonaxis_range=[108, 156],
-        showland=True, landcolor="rgb(235,235,230)", showcountries=True,
-    )
-    fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=450)
-    st.plotly_chart(fig, width="stretch")
+    asset_changes = pd.DataFrame({
+        "Status": ["Total assets", "New Assets", "Removed Assets", "Needs Review"],
+        "Count": [len(coretex_serials), len(new_installs_df), len(removed_assets_df), len(needs_review_combined)]
+    })
+
+    col_table, col_map = st.columns([1, 3])
+
+    with col_table:
+        st.table(asset_changes)
+        st.caption("New Assets matched to a Removed Asset are like-for-like replacements. Other New Assets are likely a new store or an additional unit added for demand. Needs Review flags anything that doesn't fit that pattern.")
+
+    with col_map:
+        fig = px.scatter_geo(
+            map_df, lat="lat", lon="lon",
+            hover_name="Store Name",
+            hover_data={"State": True, "Asset Type": True, "lat": False, "lon": False},
+            color="Category",
+                color_discrete_map={
+                "Baler": "#f2c744",
+                "Compactor": "#1f77b4",
+                "New Asset": "green",
+                "Needs Review": "red",
+                "Removed Asset": "purple"
+            },
+            scope="world",
+        )
+        fig.update_geos(
+            lataxis_range=[-45, -9], lonaxis_range=[108, 156],
+            showland=True, landcolor="rgb(235,235,230)", showcountries=True,
+        )
+        fig.update_layout(
+            margin={"r":0,"t":0,"l":0,"b":0}, height=450,
+            legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
+        )
+        st.plotly_chart(fig, width="stretch")
+    if len(new_installs_df) > 0:
+        with st.expander(f"View {len(new_installs_df)} New Asset(s)"):
+            new_display = new_installs_df[["Serial Number", "Match Type", "Matched Removed Serial", "Equipment Type", "Store Reference", "Suburb", "State", "Installation Date"]].rename(
+                columns={"Equipment Type": "Asset Type", "Store Reference": "Store Code", "Matched Removed Serial": "Matched Serial", "Installation Date": "Date"}
+            )
+            st.dataframe(new_display)
+    else:
+        st.success("No new assets this month.")
+
+    if len(removed_assets_df) > 0:
+        with st.expander(f"View {len(removed_assets_df)} Removed Asset(s)"):
+            removed_display = removed_assets_df[["Serial Number", "Match Type", "Matched New Serial", "Asset Type", "Store #", "Suburb", "State", "Status Change Date"]].rename(
+                columns={"Store #": "Store Code", "Matched New Serial": "Matched Serial", "Status Change Date": "Date"}
+            )
+            st.dataframe(removed_display)
+    else:
+        st.info("No removed assets this month.")
+
+    if len(needs_review_combined) > 0:
+        with st.expander(f"⚠️ View {len(needs_review_combined)} unit(s) needing review"):
+            st.dataframe(needs_review_combined)
+    else:
+        st.info("Nothing flagged for review this month.")
+
 
 elif section == "Planned Servicing":
     st.subheader("Planned servicing")
