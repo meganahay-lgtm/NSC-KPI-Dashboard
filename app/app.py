@@ -81,10 +81,18 @@ suburb_coords = {
     "Alice Springs": (-23.6980, 133.8807), "Katherine": (-14.4652, 132.2635),
 }
 
-asset_df = pd.read_excel("data/nationwide_supply_asset_list.xlsx")
-asset_df["Asset Type"] = asset_df["Asset Make/Model"].str.split(" - ").str[0]
-asset_df["lat"] = asset_df["Suburb"].map(lambda s: suburb_coords[s][0])
-asset_df["lon"] = asset_df["Suburb"].map(lambda s: suburb_coords[s][1])
+nsc_df = pd.read_excel("data/nationwide_supply_asset_list.xlsx")
+nsc_df["Asset Type"] = nsc_df["Asset Make/Model"].str.split(" - ").str[0]
+nsc_df["lat"] = nsc_df["Suburb"].map(lambda s: suburb_coords[s][0])
+nsc_df["lon"] = nsc_df["Suburb"].map(lambda s: suburb_coords[s][1])
+
+coretex_df = pd.read_excel("data/coretex_equipment_records.xlsx")
+
+nsc_serials = set(nsc_df["Serial Number"])
+coretex_serials = set(coretex_df["Serial Number"])
+missing_from_coretex = nsc_serials - coretex_serials
+missing_from_nsc = coretex_serials - nsc_serials
+asset_match_rate = (len(coretex_serials) - len(missing_from_nsc)) / len(coretex_serials) * 100
 
 section = st.sidebar.radio("Go to", [
     "Upload Files", "Asset Accuracy", "Planned Servicing",
@@ -110,14 +118,14 @@ if section == "Upload Files":
 elif section == "Asset Accuracy":
     st.subheader("Asset register accuracy")
     col1, col2 = st.columns(2)
-    col1.metric("This month", "96%", delta="+1% vs 2yr avg")
+    col1.metric("This month", f"{asset_match_rate:.1f}%", delta="+1% vs 2yr avg")
     col2.metric("2yr average", "95%")
     dummy_assets = pd.DataFrame({"Status": ["New this month", "Removed this month"], "Count": [8, 0]})
     st.table(dummy_assets)
 
     st.write("All unit locations")
     fig = px.scatter_geo(
-        asset_df, lat="lat", lon="lon",
+        nsc_df, lat="lat", lon="lon",
         hover_name="Store Name",
         hover_data={"State": True, "Asset Type": True, "lat": False, "lon": False},
         color="Asset Type", scope="world",
