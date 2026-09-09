@@ -99,7 +99,6 @@ missing_from_coretex = nsc_serials - coretex_serials
 missing_from_nsc = coretex_serials - nsc_serials
 asset_match_rate = (len(coretex_serials) - len(missing_from_nsc)) / len(coretex_serials) * 100
 
-# Assets on Coretex but not yet on NSC's register - split by how recently they were installed
 pending_coretex_df = coretex_df[coretex_df["Serial Number"].isin(missing_from_nsc)].copy()
 pending_coretex_df["Asset Type"] = pending_coretex_df["Equipment Type"]
 pending_coretex_df["Store Name"] = pending_coretex_df["Store Reference"]
@@ -112,7 +111,6 @@ pending_coretex_df["Category"] = pending_coretex_df["Installation Date"].apply(
 new_installs_df = pending_coretex_df[pending_coretex_df["Category"] == "New Asset"]
 needs_review_gap_df = pending_coretex_df[pending_coretex_df["Category"] == "Needs Review"]
 
-# Assets Coretex has marked Inactive (their way of recording decommissioned equipment)
 coretex_status_map = dict(zip(coretex_df["Serial Number"], coretex_df["Status"]))
 coretex_change_date_map = dict(zip(coretex_df["Serial Number"], pd.to_datetime(coretex_df["Status Change Date"])))
 nsc_df["Coretex Status"] = nsc_df["Serial Number"].map(coretex_status_map)
@@ -122,8 +120,6 @@ removed_assets_df = nsc_df[
     (nsc_df["Status Change Date"] >= recency_cutoff)
 ].copy()
 
-# Match new installs to removed assets at the same store, to distinguish genuine
-# like-for-like replacements from brand new store openings
 removed_by_store = removed_assets_df.groupby("Store #")["Serial Number"].apply(list).to_dict()
 new_by_store = new_installs_df.groupby("Store Reference")["Serial Number"].apply(list).to_dict()
 
@@ -157,7 +153,6 @@ for idx, row in removed_assets_df.iterrows():
 new_installs_df = new_installs_df.sort_values("Store Reference")
 removed_assets_df = removed_assets_df.sort_values("Store #")
 
-# Assets on NSC's register that don't exist in Coretex's file at all - shouldn't normally happen
 missing_entirely_df = nsc_df[nsc_df["Serial Number"].isin(missing_from_coretex)].copy()
 
 needs_review_combined = pd.concat([
@@ -173,6 +168,7 @@ map_df = pd.concat([
     nsc_df[["Store Name", "State", "Asset Type", "Category", "lat", "lon"]],
     pending_coretex_df[["Store Name", "State", "Asset Type", "Category", "lat", "lon"]]
 ], ignore_index=True)
+
 section = st.sidebar.radio("Go to", [
     "Upload Files", "Asset Accuracy", "Planned Servicing",
     "Breakdowns-Balers", "Breakdowns-Compactors",
@@ -181,18 +177,33 @@ section = st.sidebar.radio("Go to", [
 
 if section == "Upload Files":
     st.subheader("Upload this month's files")
-    st.write("Drop in the latest export from each system to refresh the dashboard")
+    st.write("Drop in the latest export from each of the four source systems to refresh the dashboard.")
 
-    asset_file = st.file_uploader("Asset register", type=["xlsx"])
-    coretex_file = st.file_uploader("Coretex equipment records", type=["xlsx"])
-    aroflo_file = st.file_uploader("Aroflo invoicing report", type=["xlsx"])
-    verified_file = st.file_uploader("Verified sign-in records", type=["xlsx"])
-    lifetime_file = st.file_uploader("Lifetime maintenance spend", type=["xlsx"])
+    row1_a, row1_b = st.columns(2)
+    with row1_a:
+        asset_file = st.file_uploader("NSC asset register", type=["xlsx"])
+    with row1_b:
+        coretex_file = st.file_uploader("Coretex equipment records", type=["xlsx"])
 
-    if all([asset_file, coretex_file, aroflo_file, verified_file, lifetime_file]):
+    row2_a, row2_b = st.columns(2)
+    with row2_a:
+        aroflo_file = st.file_uploader("Aroflo 2yr invoicing report", type=["xlsx"])
+    with row2_b:
+        lifetime_file = st.file_uploader("Aroflo lifetime maintenance spend", type=["xlsx"])
+
+    row3_a, row3_b = st.columns(2)
+    with row3_a:
+        verified_file = st.file_uploader("Verified sign-in records", type=["xlsx"])
+
+    uploaded = [asset_file, coretex_file, aroflo_file, verified_file, lifetime_file]
+    st.progress(sum(f is not None for f in uploaded) / len(uploaded))
+
+    if all(uploaded):
         st.success("All 5 files uploaded")
     else:
-        st.info("Upload all 5 files to refresh the dashboard")
+        st.info(f"{sum(f is not None for f in uploaded)} of 5 files uploaded")
+
+    st.caption("Note: uploaded files aren't wired into the dashboard's calculations yet - every tab currently reads from the local data/ folder. Connecting these uploads to the actual logic is a separate piece of work still to come.")
 
 elif section == "Asset Accuracy":
     st.subheader("Asset register accuracy")
@@ -215,7 +226,7 @@ elif section == "Asset Accuracy":
             hover_name="Store Name",
             hover_data={"State": True, "Asset Type": True, "lat": False, "lon": False},
             color="Category",
-                color_discrete_map={
+            color_discrete_map={
                 "Baler": "#f2c744",
                 "Compactor": "#1f77b4",
                 "New Asset": "green",
@@ -234,6 +245,7 @@ elif section == "Asset Accuracy":
             legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
         )
         st.plotly_chart(fig, width="stretch")
+
     if len(new_installs_df) > 0:
         with st.expander(f"View {len(new_installs_df)} New Asset(s)"):
             new_display = new_installs_df[["Serial Number", "Match Type", "Matched Removed Serial", "Equipment Type", "Store Reference", "Suburb", "State", "Installation Date"]].rename(
@@ -257,7 +269,6 @@ elif section == "Asset Accuracy":
             st.dataframe(needs_review_combined)
     else:
         st.info("Nothing flagged for review this month.")
-
 
 elif section == "Planned Servicing":
     st.subheader("Planned servicing")
