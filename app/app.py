@@ -229,7 +229,8 @@ elif section == "Asset Accuracy":
             showland=True, landcolor="rgb(235,235,230)", showcountries=True,
         )
         fig.update_layout(
-            margin={"r":0,"t":0,"l":0,"b":0}, height=450,
+            title=dict(text="All Unit Locations", x=0.5, xanchor="center"),
+            margin={"r":40,"t":50,"l":0,"b":0}, height=450,
             legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
         )
         st.plotly_chart(fig, width="stretch")
