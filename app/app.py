@@ -176,6 +176,8 @@ map_df = pd.concat([
     pending_coretex_df[["Store Name", "State", "Asset Type", "Category", "lat", "lon"]]
 ], ignore_index=True)
 
+
+
 # ---------- PLANNED SERVICING LOGIC ----------
 target_month = AS_OF_DATE.strftime("%b")
 scheduled_serials = set(nsc_df[nsc_df[target_month].notna()]["Serial Number"])
@@ -190,6 +192,21 @@ invoiced_serials = set(this_month_prevent["Asset Serial Number"])
 on_time_serials = scheduled_serials & invoiced_serials
 outstanding_serials = scheduled_serials - invoiced_serials
 servicing_on_time_rate = (len(on_time_serials) / len(scheduled_serials) * 100) if scheduled_serials else 0
+
+month_cols = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+serial_scheduled_months = {}
+for _, row in nsc_df.iterrows():
+    serial_scheduled_months[row["Serial Number"]] = set(m for m in month_cols if pd.notna(row[m]))
+
+all_prevent = aroflo_df[aroflo_df["Job Type"] == "Preventative Service"].copy()
+all_prevent["Month"] = all_prevent["Invoice Date"].dt.strftime("%b")
+
+def is_on_time(row):
+    scheduled = serial_scheduled_months.get(row["Asset Serial Number"], set())
+    return row["Month"] in scheduled
+
+all_prevent["On Time"] = all_prevent.apply(is_on_time, axis=1)
+servicing_2yr_avg_rate = all_prevent["On Time"].mean() * 100
 
 section = st.sidebar.radio("Go to", [
     "Upload Files", "Asset Accuracy", "Planned Servicing",
@@ -295,7 +312,8 @@ elif section == "Asset Accuracy":
 elif section == "Planned Servicing":
     st.subheader("Planned servicing")
     col1, col2 = st.columns(2)
-    col1.metric("This month", f"{servicing_on_time_rate:.1f}%")
+    col1.metric("This month", f"{servicing_on_time_rate:.1f}%", delta=f"{servicing_on_time_rate - servicing_2yr_avg_rate:.1f}% vs 2yr avg")
+    col2.metric("2yr average", f"{servicing_2yr_avg_rate:.1f}%")
 
     col3, col4 = st.columns(2)
     col3.metric("Completed", "115 stores")
