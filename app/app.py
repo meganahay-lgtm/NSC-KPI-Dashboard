@@ -5,6 +5,7 @@ import plotly.express as px
 st.set_page_config(layout="wide")
 st.title("NSC KPI Dashboard")
 
+# suburb name -> (lat, lon) so we can plot stores on a map
 suburb_coords = {
     # NSW
     "Parramatta": (-33.8148, 151.0011), "Chatswood": (-33.7969, 151.1830),
@@ -82,8 +83,7 @@ suburb_coords = {
     "Alice Springs": (-23.6980, 133.8807), "Katherine": (-14.4652, 132.2635),
 }
 
-
-# ---------- LOAD ALL FILES FIRST ----------
+# ---------- load the 3 files we need ----------
 nsc_df = pd.read_excel("data/nationwide_supply_asset_list.xlsx")
 nsc_df["Asset Type"] = nsc_df["Asset Make/Model"].str.split(" - ").str[0]
 nsc_df["lat"] = nsc_df["Suburb"].map(lambda s: suburb_coords[s][0])
@@ -94,18 +94,19 @@ coretex_df = pd.read_excel("data/coretex_equipment_records.xlsx")
 aroflo_df = pd.read_excel("data/aroflo_invoicing_report.xlsx")
 aroflo_df["Invoice Date"] = pd.to_datetime(aroflo_df["Invoice Date"])
 
-# ---------- REPORTING PERIOD (must come after files, before any logic using AS_OF_DATE) ----------
+# ---------- reporting period picker (sidebar) ----------
 st.sidebar.markdown("### Reporting period")
 AS_OF_DATE = pd.Timestamp(st.sidebar.date_input("Reporting period end date", value=pd.Timestamp("2025-12-31")))
 recency_cutoff = AS_OF_DATE - pd.Timedelta(days=60)
 
-# ---------- ASSET ACCURACY LOGIC ----------
+# ---------- asset accuracy: compare NSC vs Coretex ----------
 nsc_serials = set(nsc_df["Serial Number"])
 coretex_serials = set(coretex_df["Serial Number"])
 missing_from_coretex = nsc_serials - coretex_serials
 missing_from_nsc = coretex_serials - nsc_serials
 asset_match_rate = (len(coretex_serials) - len(missing_from_nsc)) / len(coretex_serials) * 100
 
+# split "missing from nsc" into New Asset (recent) vs Needs Review (old)
 pending_coretex_df = coretex_df[coretex_df["Serial Number"].isin(missing_from_nsc)].copy()
 pending_coretex_df["Asset Type"] = pending_coretex_df["Equipment Type"]
 pending_coretex_df["Store Name"] = pending_coretex_df["Store Reference"]
@@ -118,6 +119,7 @@ pending_coretex_df["Category"] = pending_coretex_df["Installation Date"].apply(
 new_installs_df = pending_coretex_df[pending_coretex_df["Category"] == "New Asset"]
 needs_review_gap_df = pending_coretex_df[pending_coretex_df["Category"] == "Needs Review"]
 
+# find units Coretex marked Inactive recently (= removed)
 coretex_status_map = dict(zip(coretex_df["Serial Number"], coretex_df["Status"]))
 coretex_change_date_map = dict(zip(coretex_df["Serial Number"], pd.to_datetime(coretex_df["Status Change Date"])))
 nsc_df["Coretex Status"] = nsc_df["Serial Number"].map(coretex_status_map)
@@ -127,6 +129,7 @@ removed_assets_df = nsc_df[
     (nsc_df["Status Change Date"] >= recency_cutoff)
 ].copy()
 
+# match new installs to removed assets at the same store = replacement
 removed_by_store = removed_assets_df.groupby("Store #")["Serial Number"].apply(list).to_dict()
 new_by_store = new_installs_df.groupby("Store Reference")["Serial Number"].apply(list).to_dict()
 
@@ -160,13 +163,16 @@ for idx, row in removed_assets_df.iterrows():
 new_installs_df = new_installs_df.sort_values("Store Reference")
 removed_assets_df = removed_assets_df.sort_values("Store #")
 
+# serials on NSC but missing from Coretex entirely (shouldn't happen)
 missing_entirely_df = nsc_df[nsc_df["Serial Number"].isin(missing_from_coretex)].copy()
 
+# combine both "needs review" cases into one table
 needs_review_combined = pd.concat([
     needs_review_gap_df.rename(columns={"Equipment Type": "Type", "Store Reference": "Store"})[["Serial Number", "Type", "Store", "State", "Installation Date"]].assign(Reason="On Coretex, not yet on NSC register (2+ months)"),
     missing_entirely_df.rename(columns={"Asset Make/Model": "Type", "Store Name": "Store"})[["Serial Number", "Type", "Store", "State"]].assign(Reason="Missing from Coretex entirely - unexpected")
 ], ignore_index=True)
 
+# build map data - everything + pending installs, tagged by category
 nsc_df["Category"] = nsc_df["Asset Type"]
 removed_serials_set = set(removed_assets_df["Serial Number"])
 nsc_df.loc[nsc_df["Serial Number"].isin(removed_serials_set), "Category"] = "Removed Asset"
@@ -176,9 +182,7 @@ map_df = pd.concat([
     pending_coretex_df[["Store Name", "State", "Asset Type", "Category", "lat", "lon"]]
 ], ignore_index=True)
 
-
-
-# ---------- PLANNED SERVICING LOGIC ----------
+# ---------- planned servicing: on-time rate this month ----------
 target_month = AS_OF_DATE.strftime("%b")
 scheduled_serials = set(nsc_df[nsc_df[target_month].notna()]["Serial Number"])
 
@@ -193,19 +197,7 @@ on_time_serials = scheduled_serials & invoiced_serials
 outstanding_serials = scheduled_serials - invoiced_serials
 servicing_on_time_rate = (len(on_time_serials) / len(scheduled_serials) * 100) if scheduled_serials else 0
 
-month_cols = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-serial_scheduled_months = {}
-for _, row in nsc_df.iterrows():
-    serial_scheduled_months[row["Serial Number"]] = set(m for m in month_cols if pd.notna(row[m]))
-
-all_prevent = aroflo_df[aroflo_df["Job Type"] == "Preventative Service"].copy()
-all_prevent["Month"] = all_prevent["Invoice Date"].dt.strftime("%b")
-
-def is_on_time(row):
-    scheduled = serial_scheduled_months.get(row["Asset Serial Number"], set())
-    return row["Month"] in scheduled
-
-
+# 24-month rolling trend, ending at the reporting date
 nsc_df["Installation Date"] = pd.to_datetime(nsc_df["Installation Date"])
 
 trend_rows = []
@@ -232,12 +224,77 @@ for period in period_range:
 
 monthly_trend = pd.DataFrame(trend_rows)
 servicing_2yr_avg_rate = monthly_trend["On Time %"].mean()
+
+# ---------- reactive capex: predict next year's breakdown spend per asset ----------
+from sklearn.linear_model import LinearRegression
+
+NEAR_REGIONAL_SUBURBS = {
+    "Newcastle", "Wollongong", "Maitland", "Nowra", "Goulburn",
+    "Geelong", "Ballarat", "Bendigo", "Shepparton", "Traralgon",
+    "Toowoomba", "Bunbury", "Launceston",
+}
+FAR_REGIONAL_SUBURBS = {
+    "Coffs Harbour", "Tamworth", "Orange", "Dubbo", "Wagga Wagga", "Albury", "Bathurst",
+    "Port Macquarie", "Lismore", "Warrnambool", "Mildura", "Wodonga",
+    "Cairns", "Townsville", "Mackay", "Rockhampton", "Bundaberg", "Gladstone", "Hervey Bay",
+    "Geraldton", "Kalgoorlie", "Albany", "Karratha",
+    "Mount Gambier", "Whyalla", "Port Augusta", "Port Lincoln",
+    "Devonport", "Burnie", "Alice Springs", "Katherine",
+}
+
+def classify_tier(suburb):
+    if suburb in NEAR_REGIONAL_SUBURBS:
+        return "Near-Regional"
+    elif suburb in FAR_REGIONAL_SUBURBS:
+        return "Far-Regional"
+    else:
+        return "Metro"
+
+# train on all historical asset-years
+lifetime_df = pd.read_excel("data/lifetime_maintenance_spend.xlsx", sheet_name="Lifetime Spend by Year")
+lifetime_df["Asset Type"] = lifetime_df["Asset"].str.split(" - ").str[0]
+serial_to_suburb = dict(zip(nsc_df["Serial Number"], nsc_df["Suburb"]))
+lifetime_df["Suburb"] = lifetime_df["Serial"].map(serial_to_suburb)
+lifetime_df["Location Tier"] = lifetime_df["Suburb"].apply(classify_tier)
+
+lifetime_df = lifetime_df.sort_values(["Serial", "Year"])
+lifetime_df["Prior Year Breakdown Spend"] = lifetime_df.groupby("Serial")["Breakdown Spend"].shift(1)
+lifetime_df_with_history = lifetime_df.dropna(subset=["Prior Year Breakdown Spend"])
+
+reactive_X = pd.get_dummies(
+    lifetime_df_with_history[["Age at Year", "Asset Type", "Location Tier", "Prior Year Breakdown Spend"]],
+    columns=["Asset Type", "Location Tier"], drop_first=True
+)
+reactive_y = lifetime_df_with_history["Breakdown Spend"]
+reactive_model = LinearRegression()
+reactive_model.fit(reactive_X, reactive_y)
+
+# apply the trained model to every CURRENT asset, aged forward one year
+latest_year_rows = lifetime_df.sort_values("Year").groupby("Serial").tail(1).set_index("Serial")
+
+predict_df = nsc_df.copy()
+predict_df["Asset Type"] = predict_df["Asset Make/Model"].str.split(" - ").str[0]
+predict_df["Location Tier"] = predict_df["Suburb"].apply(classify_tier)
+predict_df["Age at Year"] = ((AS_OF_DATE - predict_df["Installation Date"]).dt.days / 365.25) + 1
+predict_df["Prior Year Breakdown Spend"] = predict_df["Serial Number"].map(latest_year_rows["Breakdown Spend"]).fillna(0)
+
+reactive_X_predict = pd.get_dummies(
+    predict_df[["Age at Year", "Asset Type", "Location Tier", "Prior Year Breakdown Spend"]],
+    columns=["Asset Type", "Location Tier"], drop_first=True
+)
+reactive_X_predict = reactive_X_predict.reindex(columns=reactive_X.columns, fill_value=0)
+
+predict_df["Predicted Breakdown Spend"] = reactive_model.predict(reactive_X_predict).clip(min=0)
+reactive_capex_forecast = predict_df["Predicted Breakdown Spend"].sum()
+
+# ---------- sidebar navigation ----------
 section = st.sidebar.radio("Go to", [
     "Upload Files", "Asset Accuracy", "Planned Servicing",
     "Breakdowns-Balers", "Breakdowns-Compactors",
     "Pricing Compliance", "Safety Compliance", "Predictive Capex", "Recommendations"
 ])
 
+# ---------- upload files tab ----------
 if section == "Upload Files":
     st.subheader("Upload this month's files")
     st.write("Drop in the latest export from each of the four source systems to refresh the dashboard.")
@@ -270,7 +327,7 @@ if section == "Upload Files":
     st.info("Before reviewing the dashboard, set the **Reporting period end date** in the sidebar to match the month these files cover - the on-time rates and trend charts are calculated relative to that date.")
 
 
-
+# ---------- asset accuracy tab ----------
 elif section == "Asset Accuracy":
     st.subheader("Asset register accuracy")
     st.metric("Asset register accuracy", f"{asset_match_rate:.1f}%")
@@ -337,7 +394,7 @@ elif section == "Asset Accuracy":
         st.info("Nothing flagged for review this month.")
 
 
-#----------------------- PLANNED SERVICING VISUALIZATIONS-----------------------------------
+# ---------- planned servicing tab ----------
 elif section == "Planned Servicing":
 
     st.subheader("Planned servicing")
@@ -346,7 +403,7 @@ elif section == "Planned Servicing":
     outstanding_stores = set(nsc_df[nsc_df["Serial Number"].isin(outstanding_serials)]["Store #"])
     outstanding_df = nsc_df[nsc_df["Serial Number"].isin(outstanding_serials)]
 
-#----------------------------LAYOUT AND METRICS-------------------------------------------------------
+    # metrics row
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Completions on time (this month)", f"{servicing_on_time_rate:.1f}%", delta=f"{servicing_on_time_rate - servicing_2yr_avg_rate:.1f}% vs 2yr avg")
     col2.metric("Completions on time (2yr avg)", f"{servicing_2yr_avg_rate:.1f}%")
@@ -355,7 +412,7 @@ elif section == "Planned Servicing":
 
     colA, colSpacer, colB = st.columns([4, 1, 5])
 
-#------------------------TREND CAPTION BASED ON RESULT VS 2YR AVG-----------------------------------
+    # simple rule: >2 pts below avg = flag it, >2 pts above = good result, else normal
     rate_diff = servicing_on_time_rate - servicing_2yr_avg_rate
     if rate_diff < -2:
         trend_caption = "Below average result - recommend investigating further why the outstanding is higher than standard."
@@ -364,7 +421,7 @@ elif section == "Planned Servicing":
     else:
         trend_caption = "In line with the 2-year average."
 
-#----------------------------LINE CHART---------------------------------------------------------------
+    # line chart: on-time trend over 2 years
     with colA:
         trend_fig = px.line(monthly_trend, x="YearMonth", y="On Time %", title="On-Time Rate - Last 2 Years")
         trend_fig.update_yaxes(range=[70, 100], dtick=10, ticksuffix="%")
@@ -373,7 +430,7 @@ elif section == "Planned Servicing":
         st.plotly_chart(trend_fig, use_container_width=True)
         st.caption(trend_caption)
 
-#----------------------------BAR CHART---------------------------------------------------------------
+    # bar chart: outstanding by state
     with colB:
         state_fig = px.bar(
         outstanding_df.groupby("State").size().reset_index(name="Outstanding"),
@@ -383,7 +440,7 @@ elif section == "Planned Servicing":
         state_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":0}, xaxis_title=None, yaxis_title=None)
         st.plotly_chart(state_fig, use_container_width=True)
 
-#------------------------------MAP------------------------------------------------------------------
+    # map: completed vs outstanding
     servicing_map_df = nsc_df[nsc_df["Serial Number"].isin(scheduled_serials)].copy()
     servicing_map_df["Category"] = servicing_map_df["Serial Number"].apply(
         lambda s: "Completed" if s in on_time_serials else "Outstanding"
@@ -411,6 +468,7 @@ elif section == "Planned Servicing":
     completed_display_df = servicing_map_df[servicing_map_df["Category"] == "Completed"]
     outstanding_display_df = servicing_map_df[servicing_map_df["Category"] == "Outstanding"]
 
+    # drop downs of completed and outstanding
     if len(completed_display_df) > 0:
         with st.expander(f"View {len(completed_display_df)} Completed Service(s)"):
             st.dataframe(completed_display_df[["Serial Number", "Asset Type", "Store Name", "Suburb", "State"]])
@@ -424,7 +482,7 @@ elif section == "Planned Servicing":
         st.success("No outstanding services this month.")
 
 
-#-------------------------BREAKDOWNS-BALERS VISUALIZATIONS------------------------------------------
+# ---------- breakdowns - balers tab (placeholder, real data still to come) ----------
 elif section == "Breakdowns-Balers":
     st.subheader("Breakdowns - Balers")
     col1, col2 = st.columns(2)
@@ -449,6 +507,8 @@ elif section == "Breakdowns-Balers":
     })
     st.line_chart(baler_spend_trend.set_index("Month"))
 
+
+# ---------- breakdowns - compactors tab (placeholder) ----------
 elif section == "Breakdowns-Compactors":
     st.subheader("Breakdowns - Compactors")
     col1, col2 = st.columns(2)
@@ -473,6 +533,8 @@ elif section == "Breakdowns-Compactors":
     })
     st.line_chart(compactor_spend_trend.set_index("Month"))
 
+
+# ---------- pricing compliance tab (placeholder) ----------
 elif section == "Pricing Compliance":
     st.subheader("Pricing compliance")
     st.metric("Invoices flagged", "2")
@@ -483,6 +545,8 @@ elif section == "Pricing Compliance":
     })
     st.table(flagged)
 
+
+# ---------- safety compliance tab (placeholder) ----------
 elif section == "Safety Compliance":
     st.subheader("Safety compliance (Verified)")
     col1, col2 = st.columns(2)
@@ -499,11 +563,13 @@ elif section == "Safety Compliance":
     st.write("Incomplete inductions")
     st.metric("Records", "5")
 
+
+# ---------- predictive capex tab ----------
 elif section == "Predictive Capex":
     st.subheader("Predictive capex - next 12 months")
     col1, col2 = st.columns(2)
     col1.metric("Proactive (planned)", "$184k")
-    col2.metric("Reactive (unplanned)", "$96k")
+    col2.metric("Reactive (unplanned)", f"${reactive_capex_forecast:,.0f}")
 
     capex_split = pd.DataFrame({
         "Type": ["Proactive", "Reactive"],
@@ -511,6 +577,8 @@ elif section == "Predictive Capex":
     })
     st.bar_chart(capex_split.set_index("Type"))
 
+
+# ---------- recommendations tab (placeholder) ----------
 elif section == "Recommendations":
     st.subheader("Planned replacement recommendations")
     st.write("Ranked by age \u00d7 2-year breakdown spend")
