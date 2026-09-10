@@ -287,6 +287,45 @@ reactive_X_predict = reactive_X_predict.reindex(columns=reactive_X.columns, fill
 predict_df["Predicted Breakdown Spend"] = reactive_model.predict(reactive_X_predict).clip(min=0)
 reactive_capex_forecast = predict_df["Predicted Breakdown Spend"].sum()
 
+# ---------- proactive capex: predict which assets become high-risk next year ----------
+from sklearn.linear_model import LogisticRegression
+
+TYPICAL_LIFE = {"Baler": 10, "Compactor": 17.5}
+lifetime_df["Life Ratio"] = lifetime_df.apply(lambda r: r["Age at Year"] / TYPICAL_LIFE[r["Asset Type"]], axis=1)
+lifetime_df["High Risk"] = (
+    (lifetime_df["Life Ratio"] >= 0.9) &
+    (lifetime_df["Cumulative Breakdown Spend as % of Replacement Cost"] >= 50)
+).astype(int)
+
+lifetime_df = lifetime_df.sort_values(["Serial", "Year"])
+lifetime_df["Next Year High Risk"] = lifetime_df.groupby("Serial")["High Risk"].shift(-1)
+lifetime_df_labeled = lifetime_df.dropna(subset=["Next Year High Risk"])
+
+proactive_X = pd.get_dummies(
+    lifetime_df_labeled[["Age at Year", "Asset Type", "Location Tier", "Cumulative Breakdown Spend as % of Replacement Cost"]],
+    columns=["Asset Type", "Location Tier"], drop_first=True
+)
+proactive_y = lifetime_df_labeled["Next Year High Risk"]
+proactive_model = LogisticRegression(max_iter=1000)
+proactive_model.fit(proactive_X, proactive_y)
+
+# apply to the CURRENT fleet, using this year's real numbers to predict NEXT year's risk
+predict_df["Current Age"] = predict_df["Age at Year"] - 1  # undo the "+1" from the reactive model block, back to this year's real age
+latest_cum_pct = lifetime_df.sort_values("Year").groupby("Serial").tail(1).set_index("Serial")["Cumulative Breakdown Spend as % of Replacement Cost"]
+predict_df["Cumulative Breakdown Spend as % of Replacement Cost"] = predict_df["Serial Number"].map(latest_cum_pct).fillna(0)
+
+proactive_X_predict = pd.get_dummies(
+    predict_df[["Current Age", "Asset Type", "Location Tier", "Cumulative Breakdown Spend as % of Replacement Cost"]].rename(columns={"Current Age": "Age at Year"}),
+    columns=["Asset Type", "Location Tier"], drop_first=True
+)
+proactive_X_predict = proactive_X_predict.reindex(columns=proactive_X.columns, fill_value=0)
+
+predict_df["High Risk Probability"] = proactive_model.predict_proba(proactive_X_predict)[:, 1]
+predict_df["Predicted High Risk"] = predict_df["High Risk Probability"] >= 0.35
+
+proactive_capex_forecast = predict_df[predict_df["Predicted High Risk"]]["Current Replacement Cost"].sum()
+high_risk_assets_df = predict_df[predict_df["Predicted High Risk"]]
+
 # ---------- sidebar navigation ----------
 section = st.sidebar.radio("Go to", [
     "Upload Files", "Asset Accuracy", "Planned Servicing",
@@ -568,15 +607,88 @@ elif section == "Safety Compliance":
 elif section == "Predictive Capex":
     st.subheader("Predictive capex - next 12 months")
     col1, col2 = st.columns(2)
-    col1.metric("Proactive (planned)", "$184k")
+
+    with st.expander("How this forecast is calculated"):
+        st.markdown("""
+        **Reactive (unplanned)** - predicts next year's breakdown spend per asset, based on:
+        - Age and asset type
+        - Location (metro vs regional)
+        - Recent breakdown history
+
+        **Proactive (planned)** - flags assets for replacement when **both**:
+        - Age is near/past typical design life
+        - Breakdown spend is over 50% of a new unit's cost
+
+        Also catches young "lemons" - flagged separately, since these usually need a
+        warranty conversation, not a routine replacement.
+        """)
+
+    col1.metric("Proactive (planned)", f"${proactive_capex_forecast:,.0f}")
+    st.write("")
+    high_risk_display = predict_df[predict_df["Predicted High Risk"]].copy()
+    high_risk_display["Cumulative Breakdown Spend ($)"] = (
+        high_risk_display["Cumulative Breakdown Spend as % of Replacement Cost"] / 100
+        * high_risk_display["Current Replacement Cost"]
+    )
+    high_risk_display = high_risk_display[[
+        "Serial Number", "Asset Type", "Store Name", "State", "Age at Year",
+        "Cumulative Breakdown Spend ($)", "Current Replacement Cost",
+        "Cumulative Breakdown Spend as % of Replacement Cost"
+    ]].rename(columns={
+        "Age at Year": "Age (yrs)",
+        "Current Replacement Cost": "Replacement Cost",
+        "Cumulative Breakdown Spend as % of Replacement Cost": "% of Replacement Cost"
+    }).sort_values("% of Replacement Cost", ascending=False)
+    high_risk_display["Age (yrs)"] = high_risk_display["Age (yrs)"].round(1)
+
+    with st.expander(f"View {len(high_risk_display)} recommended replacement(s)"):
+        st.dataframe(high_risk_display)
+        young_high_spend = high_risk_display[high_risk_display["Age (yrs)"] < 5]
+        if len(young_high_spend) > 0:
+            st.warning(f"⚠️ {len(young_high_spend)} unit(s) flagged despite being under 5 years old - likely chronic reliability issues rather than routine end-of-life, worth escalating separately (e.g. manufacturer warranty claim) rather than routine replacement.")
     col2.metric("Reactive (unplanned)", f"${reactive_capex_forecast:,.0f}")
 
-    capex_split = pd.DataFrame({
-        "Type": ["Proactive", "Reactive"],
-        "Forecast": [184000, 96000]
-    })
-    st.bar_chart(capex_split.set_index("Type"))
+    st.write("")
+    proactive_by_state = high_risk_display.groupby("State")["Replacement Cost"].sum().reset_index()
+    proactive_by_state["Type"] = "Proactive"
+    proactive_by_state = proactive_by_state.rename(columns={"Replacement Cost": "Capex"})
 
+    reactive_by_state = predict_df.groupby("State")["Predicted Breakdown Spend"].sum().reset_index()
+    reactive_by_state["Type"] = "Reactive"
+    reactive_by_state = reactive_by_state.rename(columns={"Predicted Breakdown Spend": "Capex"})
+
+    capex_by_state = pd.concat([proactive_by_state, reactive_by_state], ignore_index=True)
+
+    state_capex_fig = px.bar(
+        capex_by_state, x="State", y="Capex", color="Type", barmode="group",
+        title="Forecast Capex by State", color_discrete_map={"Proactive": "#1f77b4", "Reactive": "#f2a65a"}
+    )
+    state_capex_fig.update_layout(height=350, margin={"l":0,"r":0,"t":40,"b":0}, yaxis_title="$")
+    st.plotly_chart(state_capex_fig, use_container_width=True)
+
+    st.write("")
+    high_risk_display_map = predict_df[predict_df["Predicted High Risk"]].copy()
+    high_risk_display_map["Is Young Lemon"] = (high_risk_display_map["Age at Year"] < 5)
+    high_risk_display_map["Category"] = high_risk_display_map["Is Young Lemon"].map({True: "Young Lemon", False: "Recommended Replacement"})
+
+    capex_map_fig = px.scatter_geo(
+        high_risk_display_map, lat="lat", lon="lon",
+        hover_name="Store Name",
+        hover_data={"State": True, "Asset Type": True, "lat": False, "lon": False},
+        color="Category",
+        color_discrete_map={"Recommended Replacement": "#1f77b4", "Young Lemon": "red"},
+        scope="world",
+    )
+    capex_map_fig.update_geos(
+        lataxis_range=[-45, -9], lonaxis_range=[108, 156],
+        showland=True, landcolor="rgb(235,235,230)", showcountries=True,
+    )
+    capex_map_fig.update_layout(
+        title=dict(text="Recommended Replacements - Locations", x=0.5, xanchor="center"),
+        margin={"r":40,"t":50,"l":0,"b":0}, height=450,
+        legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
+    )
+    st.plotly_chart(capex_map_fig, use_container_width=True)
 
 # ---------- recommendations tab (placeholder) ----------
 elif section == "Recommendations":
