@@ -205,9 +205,31 @@ def is_on_time(row):
     scheduled = serial_scheduled_months.get(row["Asset Serial Number"], set())
     return row["Month"] in scheduled
 
-all_prevent["On Time"] = all_prevent.apply(is_on_time, axis=1)
-servicing_2yr_avg_rate = all_prevent["On Time"].mean() * 100
 
+nsc_df["Installation Date"] = pd.to_datetime(nsc_df["Installation Date"])
+
+trend_rows = []
+period_range = pd.period_range("2024-01", "2025-12", freq="M")
+for period in period_range:
+    month_name = period.strftime("%b")
+    period_ts = period.to_timestamp(how="end")
+
+    eligible = nsc_df[
+        (nsc_df[month_name].notna()) &
+        (nsc_df["Installation Date"] <= period_ts)
+    ]
+    scheduled_this_period = set(eligible["Serial Number"])
+
+    invoiced_this_period = set(aroflo_df[
+        (aroflo_df["Job Type"] == "Preventative Service") &
+        (aroflo_df["Invoice Date"].dt.strftime("%Y-%m") == str(period))
+    ]["Asset Serial Number"])
+
+    rate = (len(scheduled_this_period & invoiced_this_period) / len(scheduled_this_period) * 100) if scheduled_this_period else None
+    trend_rows.append({"YearMonth": str(period), "On Time %": rate})
+
+monthly_trend = pd.DataFrame(trend_rows)
+servicing_2yr_avg_rate = monthly_trend["On Time %"].mean()
 section = st.sidebar.radio("Go to", [
     "Upload Files", "Asset Accuracy", "Planned Servicing",
     "Breakdowns-Balers", "Breakdowns-Compactors",
@@ -309,16 +331,27 @@ elif section == "Asset Accuracy":
     else:
         st.info("Nothing flagged for review this month.")
 
+
+#----------------------- PLANNED SERVICING VISUALIZATIONS-----------------------------------
 elif section == "Planned Servicing":
     st.subheader("Planned servicing")
-    col1, col2 = st.columns(2)
-    col1.metric("This month", f"{servicing_on_time_rate:.1f}%", delta=f"{servicing_on_time_rate - servicing_2yr_avg_rate:.1f}% vs 2yr avg")
-    col2.metric("2yr average", f"{servicing_2yr_avg_rate:.1f}%")
+    col1, col2, col3 = st.columns([1, 1, 2])
+    col1.metric("Completions on time (this month)", f"{servicing_on_time_rate:.1f}%", delta=f"{servicing_on_time_rate - servicing_2yr_avg_rate:.1f}% vs 2yr avg")
+    col2.metric("Completions on time (2yr avg)", f"{servicing_2yr_avg_rate:.1f}%")
+
+    with col3:
+        trend_fig = px.line(monthly_trend, x="YearMonth", y="On Time %", title="On-Time Rate - Last 2 Years")
+        trend_fig.update_yaxes(range=[70, 100], dtick=10, ticksuffix="%")
+        trend_fig.update_xaxes(tickangle=-45)
+        trend_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
+        st.plotly_chart(trend_fig, use_container_width=True)
+
+    completed_stores = set(nsc_df[nsc_df["Serial Number"].isin(on_time_serials)]["Store #"])
+    outstanding_stores = set(nsc_df[nsc_df["Serial Number"].isin(outstanding_serials)]["Store #"])
 
     col3, col4 = st.columns(2)
-    col3.metric("Completed", "115 stores")
-    col4.metric("Outstanding", "9 stores")
-
+    col3.metric("Completed", f"{len(completed_stores)} stores")
+    col4.metric("Outstanding", f"{len(outstanding_stores)} stores")
     st.write("Outstanding services by state")
     outstanding_state = pd.DataFrame({
         "State": ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"],
