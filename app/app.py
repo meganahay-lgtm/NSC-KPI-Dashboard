@@ -82,6 +82,8 @@ suburb_coords = {
     "Alice Springs": (-23.6980, 133.8807), "Katherine": (-14.4652, 132.2635),
 }
 
+
+# ---------- LOAD ALL FILES FIRST ----------
 nsc_df = pd.read_excel("data/nationwide_supply_asset_list.xlsx")
 nsc_df["Asset Type"] = nsc_df["Asset Make/Model"].str.split(" - ").str[0]
 nsc_df["lat"] = nsc_df["Suburb"].map(lambda s: suburb_coords[s][0])
@@ -89,10 +91,15 @@ nsc_df["lon"] = nsc_df["Suburb"].map(lambda s: suburb_coords[s][1])
 
 coretex_df = pd.read_excel("data/coretex_equipment_records.xlsx")
 
+aroflo_df = pd.read_excel("data/aroflo_invoicing_report.xlsx")
+aroflo_df["Invoice Date"] = pd.to_datetime(aroflo_df["Invoice Date"])
+
+# ---------- REPORTING PERIOD (must come after files, before any logic using AS_OF_DATE) ----------
 st.sidebar.markdown("### Reporting period")
 AS_OF_DATE = pd.Timestamp(st.sidebar.date_input("Reporting period end date", value=pd.Timestamp("2025-12-31")))
 recency_cutoff = AS_OF_DATE - pd.Timedelta(days=60)
 
+# ---------- ASSET ACCURACY LOGIC ----------
 nsc_serials = set(nsc_df["Serial Number"])
 coretex_serials = set(coretex_df["Serial Number"])
 missing_from_coretex = nsc_serials - coretex_serials
@@ -168,6 +175,21 @@ map_df = pd.concat([
     nsc_df[["Store Name", "State", "Asset Type", "Category", "lat", "lon"]],
     pending_coretex_df[["Store Name", "State", "Asset Type", "Category", "lat", "lon"]]
 ], ignore_index=True)
+
+# ---------- PLANNED SERVICING LOGIC ----------
+target_month = AS_OF_DATE.strftime("%b")
+scheduled_serials = set(nsc_df[nsc_df[target_month].notna()]["Serial Number"])
+
+this_month_prevent = aroflo_df[
+    (aroflo_df["Job Type"] == "Preventative Service") &
+    (aroflo_df["Invoice Date"].dt.strftime("%b") == target_month) &
+    (aroflo_df["Invoice Date"].dt.year == AS_OF_DATE.year)
+]
+invoiced_serials = set(this_month_prevent["Asset Serial Number"])
+
+on_time_serials = scheduled_serials & invoiced_serials
+outstanding_serials = scheduled_serials - invoiced_serials
+servicing_on_time_rate = (len(on_time_serials) / len(scheduled_serials) * 100) if scheduled_serials else 0
 
 section = st.sidebar.radio("Go to", [
     "Upload Files", "Asset Accuracy", "Planned Servicing",
@@ -273,8 +295,7 @@ elif section == "Asset Accuracy":
 elif section == "Planned Servicing":
     st.subheader("Planned servicing")
     col1, col2 = st.columns(2)
-    col1.metric("This month", "92%", delta="-3% vs 2yr avg")
-    col2.metric("2yr average", "95%")
+    col1.metric("This month", f"{servicing_on_time_rate:.1f}%")
 
     col3, col4 = st.columns(2)
     col3.metric("Completed", "115 stores")
