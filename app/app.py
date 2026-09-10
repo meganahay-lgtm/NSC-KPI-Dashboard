@@ -209,7 +209,9 @@ def is_on_time(row):
 nsc_df["Installation Date"] = pd.to_datetime(nsc_df["Installation Date"])
 
 trend_rows = []
-period_range = pd.period_range("2024-01", "2025-12", freq="M")
+end_period = AS_OF_DATE.to_period("M")
+start_period = end_period - 23
+period_range = pd.period_range(start_period, end_period, freq="M")
 for period in period_range:
     month_name = period.strftime("%b")
     period_ts = period.to_timestamp(how="end")
@@ -265,6 +267,9 @@ if section == "Upload Files":
         st.info(f"{sum(f is not None for f in uploaded)} of 5 files uploaded")
 
     st.caption("Note: uploaded files aren't wired into the dashboard's calculations yet - every tab currently reads from the local data/ folder. Connecting these uploads to the actual logic is a separate piece of work still to come.")
+    st.info("Before reviewing the dashboard, set the **Reporting period end date** in the sidebar to match the month these files cover - the on-time rates and trend charts are calculated relative to that date.")
+
+
 
 elif section == "Asset Accuracy":
     st.subheader("Asset register accuracy")
@@ -334,35 +339,92 @@ elif section == "Asset Accuracy":
 
 #----------------------- PLANNED SERVICING VISUALIZATIONS-----------------------------------
 elif section == "Planned Servicing":
+
     st.subheader("Planned servicing")
-    col1, col2, col3 = st.columns([1, 1, 2])
+
+    completed_stores = set(nsc_df[nsc_df["Serial Number"].isin(on_time_serials)]["Store #"])
+    outstanding_stores = set(nsc_df[nsc_df["Serial Number"].isin(outstanding_serials)]["Store #"])
+    outstanding_df = nsc_df[nsc_df["Serial Number"].isin(outstanding_serials)]
+
+#----------------------------LAYOUT AND METRICS-------------------------------------------------------
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Completions on time (this month)", f"{servicing_on_time_rate:.1f}%", delta=f"{servicing_on_time_rate - servicing_2yr_avg_rate:.1f}% vs 2yr avg")
     col2.metric("Completions on time (2yr avg)", f"{servicing_2yr_avg_rate:.1f}%")
+    col3.metric("Completed", f"{len(completed_stores)} stores")
+    col4.metric("Outstanding", f"{len(outstanding_stores)} stores")
 
-    with col3:
+    colA, colSpacer, colB = st.columns([4, 1, 5])
+
+#------------------------TREND CAPTION BASED ON RESULT VS 2YR AVG-----------------------------------
+    rate_diff = servicing_on_time_rate - servicing_2yr_avg_rate
+    if rate_diff < -2:
+        trend_caption = "Below average result - recommend investigating further why the outstanding is higher than standard."
+    elif rate_diff > 2:
+        trend_caption = "Above average result."
+    else:
+        trend_caption = "In line with the 2-year average."
+
+#----------------------------LINE CHART---------------------------------------------------------------
+    with colA:
         trend_fig = px.line(monthly_trend, x="YearMonth", y="On Time %", title="On-Time Rate - Last 2 Years")
         trend_fig.update_yaxes(range=[70, 100], dtick=10, ticksuffix="%")
         trend_fig.update_xaxes(tickangle=-45)
         trend_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
         st.plotly_chart(trend_fig, use_container_width=True)
+        st.caption(trend_caption)
 
-    completed_stores = set(nsc_df[nsc_df["Serial Number"].isin(on_time_serials)]["Store #"])
-    outstanding_stores = set(nsc_df[nsc_df["Serial Number"].isin(outstanding_serials)]["Store #"])
+#----------------------------BAR CHART---------------------------------------------------------------
+    with colB:
+        state_fig = px.bar(
+        outstanding_df.groupby("State").size().reset_index(name="Outstanding"),
+        x="State", y="Outstanding", title="Outstanding Services by State"
+        )
+        state_fig.update_yaxes(dtick=1)
+        state_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":0}, xaxis_title=None, yaxis_title=None)
+        st.plotly_chart(state_fig, use_container_width=True)
 
-    col3, col4 = st.columns(2)
-    col3.metric("Completed", f"{len(completed_stores)} stores")
-    col4.metric("Outstanding", f"{len(outstanding_stores)} stores")
-    st.write("Outstanding services by state")
-    outstanding_state = pd.DataFrame({
-        "State": ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"],
-        "Outstanding": [3, 2, 1, 1, 1, 1, 0, 0]
-    })
-    st.bar_chart(outstanding_state.set_index("State"))
+#------------------------------MAP------------------------------------------------------------------
+    servicing_map_df = nsc_df[nsc_df["Serial Number"].isin(scheduled_serials)].copy()
+    servicing_map_df["Category"] = servicing_map_df["Serial Number"].apply(
+        lambda s: "Completed" if s in on_time_serials else "Outstanding"
+    )
 
-    st.write("Where the outstanding stores are")
-    map_data = pd.DataFrame({"lat": [-32.73, -36.76], "lon": [151.55, 144.28]})
-    st.map(map_data)
+    servicing_fig = px.scatter_geo(
+        servicing_map_df, lat="lat", lon="lon",
+        hover_name="Store Name",
+        hover_data={"State": True, "Asset Type": True, "lat": False, "lon": False},
+        color="Category",
+        color_discrete_map={"Completed": "green", "Outstanding": "red"},
+        scope="world",
+    )
+    servicing_fig.update_geos(
+        lataxis_range=[-45, -9], lonaxis_range=[108, 156],
+        showland=True, landcolor="rgb(235,235,230)", showcountries=True,
+    )
+    servicing_fig.update_layout(
+        title=dict(text="This Month's Scheduled Servicing", x=0.5, xanchor="center"),
+        margin={"r":40,"t":50,"l":0,"b":0}, height=450,
+        legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
+    )
+    st.plotly_chart(servicing_fig, use_container_width=True)
 
+    completed_display_df = servicing_map_df[servicing_map_df["Category"] == "Completed"]
+    outstanding_display_df = servicing_map_df[servicing_map_df["Category"] == "Outstanding"]
+
+    if len(completed_display_df) > 0:
+        with st.expander(f"View {len(completed_display_df)} Completed Service(s)"):
+            st.dataframe(completed_display_df[["Serial Number", "Asset Type", "Store Name", "Suburb", "State"]])
+    else:
+        st.info("No completed services this month.")
+
+    if len(outstanding_display_df) > 0:
+        with st.expander(f"View {len(outstanding_display_df)} Outstanding Service(s)"):
+            st.dataframe(outstanding_display_df[["Serial Number", "Asset Type", "Store Name", "Suburb", "State"]])
+    else:
+        st.success("No outstanding services this month.")
+
+
+#-------------------------BREAKDOWNS-BALERS VISUALIZATIONS------------------------------------------
 elif section == "Breakdowns-Balers":
     st.subheader("Breakdowns - Balers")
     col1, col2 = st.columns(2)
