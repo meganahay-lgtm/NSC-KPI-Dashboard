@@ -143,9 +143,11 @@ if section == "Upload Files":
 
     st.markdown(
         "This dashboard tracks servicing compliance, breakdown costs, and asset performance "
-        "for balers and compactors across Nationwide Supply Co's store network. Built for Coretex to manage each month to review with NSC's "
-        "Facilities Operations team."
-    )
+        "for balers and compactors across Nationwide Supply Co's store network."
+)
+    st.markdown(
+        "Built for Coretex to manage each month to review with NSC's Facilities Operations team."
+)
 
     st.subheader("Upload this month's files")
     st.write("Drop in the latest export from each of the four source systems to refresh the dashboard.")
