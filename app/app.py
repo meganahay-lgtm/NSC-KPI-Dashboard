@@ -69,10 +69,14 @@ def get_suburb_coords(suburb, state):
 # ============================================================
 # 3. LOAD DATA FILES (shared by every tab)
 # ============================================================
+
+def extract_coords(row):
+    coords = get_suburb_coords(row["Suburb"], row["State"])
+    return pd.Series({"lat": coords[0], "lon": coords[1]})
+
 nsc_df = pd.read_excel("data/nationwide_supply_asset_list.xlsx")
 nsc_df["Asset Type"] = nsc_df["Asset Make/Model"].str.split(" - ").str[0]
-nsc_df["lat"] = nsc_df.apply(lambda r: get_suburb_coords(r["Suburb"], r["State"])[0], axis=1)
-nsc_df["lon"] = nsc_df.apply(lambda r: get_suburb_coords(r["Suburb"], r["State"])[1], axis=1)
+nsc_df[["lat", "lon"]] = nsc_df.apply(extract_coords, axis=1)
 nsc_df["Installation Date"] = pd.to_datetime(nsc_df["Installation Date"])  # needed by both Planned Servicing AND Predictive Capex
 
 NEAR_REGIONAL_SUBURBS = {
@@ -171,15 +175,26 @@ elif section == "Asset Accuracy":
     missing_from_nsc = coretex_serials - nsc_serials
     asset_match_rate = (len(coretex_serials) - len(missing_from_nsc)) / len(coretex_serials) * 100
 
+    # ---------- helper functions ----------
+    def extract_coords(row):
+        coords = get_suburb_coords(row["Suburb"], row["State"])
+        return pd.Series({"lat": coords[0], "lon": coords[1]})
+
+    def classify_installation(date_value):
+        if date_value >= recency_cutoff:
+            return "New Asset"
+        else:
+            return "Needs Review"
+
+    # ---------- dataframe logic ----------
     pending_coretex_df = coretex_df[coretex_df["Serial Number"].isin(missing_from_nsc)].copy()
     pending_coretex_df["Asset Type"] = pending_coretex_df["Equipment Type"]
     pending_coretex_df["Store Name"] = pending_coretex_df["Store Reference"]
-    pending_coretex_df["lat"] = pending_coretex_df.apply(lambda r: get_suburb_coords(r["Suburb"], r["State"])[0], axis=1)
-    pending_coretex_df["lon"] = pending_coretex_df.apply(lambda r: get_suburb_coords(r["Suburb"], r["State"])[1], axis=1)
     pending_coretex_df["Installation Date"] = pd.to_datetime(pending_coretex_df["Installation Date"])
-    pending_coretex_df["Category"] = pending_coretex_df["Installation Date"].apply(
-        lambda d: "New Asset" if d >= recency_cutoff else "Needs Review"
-    )
+
+    pending_coretex_df[["lat", "lon"]] = pending_coretex_df.apply(extract_coords, axis=1)
+    pending_coretex_df["Category"] = pending_coretex_df["Installation Date"].apply(classify_installation)
+
     new_installs_df = pending_coretex_df[pending_coretex_df["Category"] == "New Asset"]
     needs_review_gap_df = pending_coretex_df[pending_coretex_df["Category"] == "Needs Review"]
 
@@ -397,10 +412,16 @@ elif section == "Planned Servicing":
 
     # ---------- completed/outstanding map ----------
     servicing_map_df = nsc_df[nsc_df["Serial Number"].isin(scheduled_serials)].copy()
-    servicing_map_df["Category"] = servicing_map_df["Serial Number"].apply(
-        lambda s: "Completed" if s in on_time_serials else "Outstanding"
-    )
 
+    def classify_servicing(serial_number):
+        if serial_number in on_time_serials:
+            return "Completed"
+        else:
+            return "Outstanding"
+
+    servicing_map_df["Category"] = servicing_map_df["Serial Number"].apply(classify_servicing)
+
+    # ---------- map visual ----------
     servicing_fig = px.scatter_geo(
         servicing_map_df, lat="lat", lon="lon",
         hover_name="Store Name",
@@ -420,10 +441,10 @@ elif section == "Planned Servicing":
     )
     st.plotly_chart(servicing_fig, use_container_width=True)
 
+    # ---------- completed/outstanding tables ----------
     completed_display_df = servicing_map_df[servicing_map_df["Category"] == "Completed"]
     outstanding_display_df = servicing_map_df[servicing_map_df["Category"] == "Outstanding"]
 
-    # ---------- completed/outstanding dropdowns ----------
     if len(completed_display_df) > 0:
         with st.expander(f"View {len(completed_display_df)} Completed Service(s)"):
             st.dataframe(completed_display_df[["Serial Number", "Asset Type", "Store Name", "Suburb", "State"]])
@@ -521,14 +542,32 @@ elif section == "Pricing Compliance":
 
     flagged_df = prev_df[prev_df["Amount (AUD)"] != prev_df["Expected Price"]].copy()
 
-    # ---------- metrics row ----------
+     # ---------- metrics row ----------
     st.subheader("Pricing compliance")
 
-    col1, col2 = st.columns(2)
+    compliance_rate = (len(prev_df) - len(flagged_df)) / len(prev_df) * 100
+
+    col1, col2, col3 = st.columns(3)
     col1.metric("Invoices flagged", len(flagged_df))
     col2.metric("Preventative invoices checked", len(prev_df))
+    col3.metric("Pricing compliance rate", f"{compliance_rate:.1f}%")
+
+    # ---------- pricing insight caption ----------
+    if len(flagged_df) == 0:
+        insight_caption = "All preventative invoices this period were priced correctly."
+    else:
+        total_variance = (flagged_df["Amount (AUD)"] - flagged_df["Expected Price"]).sum()
+        if total_variance > 0:
+            insight_caption = f"{len(flagged_df)} invoice(s) flagged, resulting in a total overcharge of ${total_variance:,.0f} - recommend following up with Coretex Waste Solutions."
+        elif total_variance < 0:
+            insight_caption = f"{len(flagged_df)} invoice(s) flagged, resulting in a total undercharge of ${abs(total_variance):,.0f}."
+        else:
+            insight_caption = f"{len(flagged_df)} invoice(s) flagged for incorrect pricing, though total charged happened to match total expected overall."
+
+    st.caption(insight_caption)
 
     if len(flagged_df) > 0:
+
         # ---------- flagged invoices dropdown ----------
         flagged_display = flagged_df[[
             "Invoice Number", "Invoice Date", "Store Reference", "Asset Serial Number",
@@ -627,7 +666,13 @@ elif section == "Predictive Capex":
     from sklearn.linear_model import LogisticRegression
 
     TYPICAL_LIFE = {"Baler": 10, "Compactor": 17.5}
-    lifetime_df["Life Ratio"] = lifetime_df.apply(lambda r: r["Age at Year"] / TYPICAL_LIFE[r["Asset Type"]], axis=1)
+
+    def calculate_life_ratio(row):
+        typical_life = TYPICAL_LIFE[row["Asset Type"]]
+        return row["Age at Year"] / typical_life
+
+    lifetime_df["Life Ratio"] = lifetime_df.apply(calculate_life_ratio, axis=1)
+
     lifetime_df["High Risk"] = (
         (lifetime_df["Life Ratio"] >= 0.9) &
         (lifetime_df["Cumulative Breakdown Spend as % of Replacement Cost"] >= 50)
