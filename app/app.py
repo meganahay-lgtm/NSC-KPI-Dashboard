@@ -117,6 +117,11 @@ coretex_df = pd.read_excel("data/coretex_equipment_records.xlsx")
 aroflo_df = pd.read_excel("data/aroflo_invoicing_report.xlsx")
 aroflo_df["Invoice Date"] = pd.to_datetime(aroflo_df["Invoice Date"])
 
+verified_df = pd.read_excel("data/verified_signin_records.xlsx")
+verified_df["Sign-In Date"] = pd.to_datetime(verified_df["Sign-In Date & Time"])
+verified_df["Asset Serial"] = verified_df["Purpose of Visit"].str.split("Asset ").str[1]
+
+
 
 # ============================================================
 # 4. REPORTING PERIOD PICKER (shared - sidebar)
@@ -312,6 +317,7 @@ elif section == "Asset Accuracy":
             margin={"r":40,"t":50,"l":0,"b":0}, height=450,
             legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
         )
+        fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig, width="stretch")
 
     # ---------- New/Removed/Needs Review dropdowns ----------
@@ -456,6 +462,7 @@ elif section == "Planned Servicing":
         margin={"r":40,"t":50,"l":0,"b":0}, height=450,
         legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
     )
+    servicing_fig.update_traces(marker=dict(size=10))
     st.plotly_chart(servicing_fig, use_container_width=True)
 
     # ---------- completed/outstanding tables ----------
@@ -617,24 +624,86 @@ elif section == "Pricing Compliance":
 
 
 # ============================================================
-# 12. TAB - SAFETY COMPLIANCE (placeholder)
+# 12. TAB - SAFETY COMPLIANCE
 # ============================================================
 elif section == "Safety Compliance":
+
+    # ---------- metric logic ----------
+    target_year_month = AS_OF_DATE.strftime("%Y-%m")
+
+    verified_prevent = verified_df[verified_df["Purpose of Visit"].str.startswith("Preventative Service")].copy()
+    verified_prevent["YearMonth"] = verified_prevent["Sign-In Date"].dt.strftime("%Y-%m")
+    verified_pairs = set(zip(verified_prevent["Asset Serial"], verified_prevent["YearMonth"]))
+
+    this_month_invoices = aroflo_df[
+        (aroflo_df["Job Type"] == "Preventative Service") &
+        (aroflo_df["Invoice Date"].dt.strftime("%Y-%m") == target_year_month)
+    ]
+
+    signed_in_count = 0
+    for index, row in this_month_invoices.iterrows():
+        pair = (row["Asset Serial Number"], target_year_month)
+        if pair in verified_pairs:
+            signed_in_count += 1
+
+    compliance_rate_this_month = (signed_in_count / len(this_month_invoices) * 100) if len(this_month_invoices) > 0 else 0
+
+    trend_rows = []
+    end_period = AS_OF_DATE.to_period("M")
+    start_period = end_period - 23
+    period_range = pd.period_range(start_period, end_period, freq="M")
+    for period in period_range:
+        year_month = str(period)
+        invoices_this_period = aroflo_df[
+            (aroflo_df["Job Type"] == "Preventative Service") &
+            (aroflo_df["Invoice Date"].dt.strftime("%Y-%m") == year_month)
+        ]
+        if len(invoices_this_period) == 0:
+            trend_rows.append({"YearMonth": year_month, "Compliance %": None})
+            continue
+        matched = 0
+        for index, row in invoices_this_period.iterrows():
+            pair = (row["Asset Serial Number"], year_month)
+            if pair in verified_pairs:
+                matched += 1
+        rate = matched / len(invoices_this_period) * 100
+        trend_rows.append({"YearMonth": year_month, "Compliance %": rate})
+
+    compliance_trend_df = pd.DataFrame(trend_rows)
+    compliance_2yr_avg = compliance_trend_df["Compliance %"].mean()
+
+    incomplete_inductions_df = verified_df[
+        (verified_df["Induction Completed"] == "No") &
+        (verified_df["Sign-In Date"].dt.strftime("%Y-%m") == target_year_month)
+    ].copy()
+
+    total_signins_this_month = len(verified_df[verified_df["Sign-In Date"].dt.strftime("%Y-%m") == target_year_month])
+
+    # ---------- metrics row ----------
     st.subheader("Safety compliance (Verified)")
-    col1, col2 = st.columns(2)
-    col1.metric("This month", "91%", delta="+13% vs 2yr avg")
-    col2.metric("2yr average", "78%")
 
-    st.write("Compliance trend")
-    compliance_trend = pd.DataFrame({
-        "Month": ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
-        "Compliance %": [88, 90, 89, 93, 90, 91]
-    })
-    st.line_chart(compliance_trend.set_index("Month"))
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Incomplete inductions", f"{len(incomplete_inductions_df)} of {total_signins_this_month}")
+    col2.metric("This month", f"{compliance_rate_this_month:.1f}%", delta=f"{compliance_rate_this_month - compliance_2yr_avg:.1f}% vs 2yr avg")
+    col3.metric("2yr average", f"{compliance_2yr_avg:.1f}%")
 
-    st.write("Incomplete inductions")
-    st.metric("Records", "5")
+    # ---------- compliance trend line chart ----------
+    trend_fig = px.line(compliance_trend_df, x="YearMonth", y="Compliance %", title="Sign-In Compliance - Last 2 Years")
+    trend_fig.update_yaxes(range=[0, 100], dtick=20, ticksuffix="%")
+    trend_fig.update_xaxes(tickangle=-45)
+    trend_fig.update_layout(height=300, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
+    st.plotly_chart(trend_fig, use_container_width=True)
 
+    # ---------- incomplete inductions dropdown ----------
+    if len(incomplete_inductions_df) > 0:
+        with st.expander(f"View {len(incomplete_inductions_df)} incomplete induction record(s)"):
+            incomplete_display = incomplete_inductions_df[[
+                "Site Reference", "Store Name", "Technician Name", "Contractor Company",
+                "Purpose of Visit", "Sign-In Date & Time"
+            ]].sort_values("Sign-In Date & Time")
+            st.dataframe(incomplete_display)
+    else:
+        st.success("All technicians completed induction this period.")
 
 # ============================================================
 # 13. TAB - PREDICTIVE CAPEX
@@ -810,4 +879,5 @@ elif section == "Predictive Capex":
         margin={"r":40,"t":50,"l":0,"b":0}, height=450,
         legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
     )
+    capex_map_fig.update_traces(marker=dict(size=10))
     st.plotly_chart(capex_map_fig, use_container_width=True)
