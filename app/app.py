@@ -120,6 +120,10 @@ aroflo_df["Invoice Date"] = pd.to_datetime(aroflo_df["Invoice Date"])
 verified_df = pd.read_excel("data/verified_signin_records.xlsx")
 verified_df["Sign-In Date"] = pd.to_datetime(verified_df["Sign-In Date & Time"])
 verified_df["Asset Serial"] = verified_df["Purpose of Visit"].str.split("Asset ").str[1]
+verified_df = pd.read_excel("data/verified_signin_records.xlsx")
+verified_df["Sign-In Date"] = pd.to_datetime(verified_df["Sign-In Date & Time"])
+verified_df["Asset Serial"] = verified_df["Purpose of Visit"].str.split("Asset ").str[1]
+verified_df["Visit Type"] = verified_df["Purpose of Visit"].str.split(" - Asset").str[0]
 
 
 
@@ -623,29 +627,54 @@ elif section == "Pricing Compliance":
     st.plotly_chart(scatter_fig, use_container_width=True)
 
 
+
 # ============================================================
-# 12. TAB - SAFETY COMPLIANCE
+# 11. TAB - SAFETY COMPLIANCE
 # ============================================================
 elif section == "Safety Compliance":
+    st.subheader("Safety compliance (Verified)")
+    st.caption(
+        "Verified is a contractor safety and management system used by NSC, requiring the sign in and induction "
+        "of all contractors and visitors to their sites.  \n"
+        "It is important to monitor because incomplete inductions signal that a contractor has worked "
+        "on site without being set up in Verified, where all license and insurance requirements are recorded.  \n"
+        "This raises WHS and compliance risk, including the potential for incidents involving unverified contractors."
+    )
+    st.write("")
 
-    # ---------- metric logic ----------
     target_year_month = AS_OF_DATE.strftime("%Y-%m")
-
-    verified_prevent = verified_df[verified_df["Purpose of Visit"].str.startswith("Preventative Service")].copy()
-    verified_prevent["YearMonth"] = verified_prevent["Sign-In Date"].dt.strftime("%Y-%m")
-    verified_pairs = set(zip(verified_prevent["Asset Serial"], verified_prevent["YearMonth"]))
+    verified_all = verified_df.copy()
+    verified_all["YearMonth"] = verified_all["Sign-In Date"].dt.strftime("%Y-%m")
+    verified_pairs_any = set(zip(verified_all["Asset Serial"], verified_all["YearMonth"], verified_all["Visit Type"]))
+    verified_pairs_completed = set(zip(
+        verified_all[verified_all["Induction Completed"] == "Yes"]["Asset Serial"],
+        verified_all[verified_all["Induction Completed"] == "Yes"]["YearMonth"],
+        verified_all[verified_all["Induction Completed"] == "Yes"]["Visit Type"]
+    ))
 
     this_month_invoices = aroflo_df[
-        (aroflo_df["Job Type"] == "Preventative Service") &
-        (aroflo_df["Invoice Date"].dt.strftime("%Y-%m") == target_year_month)
-    ]
+        aroflo_df["Invoice Date"].dt.strftime("%Y-%m") == target_year_month
+    ].copy()
 
-    signed_in_count = 0
+    compliance_categories = []
+    missing_signin_rows = []
+    incomplete_induction_asset_rows = []
     for index, row in this_month_invoices.iterrows():
-        pair = (row["Asset Serial Number"], target_year_month)
-        if pair in verified_pairs:
-            signed_in_count += 1
+        pair = (row["Asset Serial Number"], target_year_month, row["Job Type"])
+        if pair in verified_pairs_completed:
+            compliance_categories.append("Compliant")
+        else:
+            compliance_categories.append("Not Compliant")
+            if pair in verified_pairs_any:
+                incomplete_induction_asset_rows.append(row)
+            else:
+                missing_signin_rows.append(row)
 
+    this_month_invoices["Category"] = compliance_categories
+    missing_signin_df = pd.DataFrame(missing_signin_rows)
+    incomplete_induction_df = pd.DataFrame(incomplete_induction_asset_rows)
+
+    signed_in_count = compliance_categories.count("Compliant")
     compliance_rate_this_month = (signed_in_count / len(this_month_invoices) * 100) if len(this_month_invoices) > 0 else 0
 
     trend_rows = []
@@ -655,16 +684,15 @@ elif section == "Safety Compliance":
     for period in period_range:
         year_month = str(period)
         invoices_this_period = aroflo_df[
-            (aroflo_df["Job Type"] == "Preventative Service") &
-            (aroflo_df["Invoice Date"].dt.strftime("%Y-%m") == year_month)
+            aroflo_df["Invoice Date"].dt.strftime("%Y-%m") == year_month
         ]
         if len(invoices_this_period) == 0:
             trend_rows.append({"YearMonth": year_month, "Compliance %": None})
             continue
         matched = 0
         for index, row in invoices_this_period.iterrows():
-            pair = (row["Asset Serial Number"], year_month)
-            if pair in verified_pairs:
+            pair = (row["Asset Serial Number"], year_month, row["Job Type"])
+            if pair in verified_pairs_completed:
                 matched += 1
         rate = matched / len(invoices_this_period) * 100
         trend_rows.append({"YearMonth": year_month, "Compliance %": rate})
@@ -672,38 +700,106 @@ elif section == "Safety Compliance":
     compliance_trend_df = pd.DataFrame(trend_rows)
     compliance_2yr_avg = compliance_trend_df["Compliance %"].mean()
 
-    incomplete_inductions_df = verified_df[
-        (verified_df["Induction Completed"] == "No") &
-        (verified_df["Sign-In Date"].dt.strftime("%Y-%m") == target_year_month)
-    ].copy()
-
-    total_signins_this_month = len(verified_df[verified_df["Sign-In Date"].dt.strftime("%Y-%m") == target_year_month])
-
-    # ---------- metrics row ----------
-    st.subheader("Safety compliance (Verified)")
+    store_to_lat = dict(zip(nsc_df["Store #"], nsc_df["lat"]))
+    store_to_lon = dict(zip(nsc_df["Store #"], nsc_df["lon"]))
+    store_to_name = dict(zip(nsc_df["Store #"], nsc_df["Store Name"]))
+    this_month_invoices["lat"] = this_month_invoices["Store Reference"].map(store_to_lat)
+    this_month_invoices["lon"] = this_month_invoices["Store Reference"].map(store_to_lon)
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Incomplete inductions", f"{len(incomplete_inductions_df)} of {total_signins_this_month}")
-    col2.metric("This month", f"{compliance_rate_this_month:.1f}%", delta=f"{compliance_rate_this_month - compliance_2yr_avg:.1f}% vs 2yr avg")
+    col1.metric("Fully sign-in compliant", f"{signed_in_count} of {len(this_month_invoices)} invoiced jobs")
+    col2.metric("This month compliance", f"{compliance_rate_this_month:.1f}%", delta=f"{compliance_rate_this_month - compliance_2yr_avg:.1f}% vs 2yr avg")
     col3.metric("2yr average", f"{compliance_2yr_avg:.1f}%")
 
-    # ---------- compliance trend line chart ----------
-    trend_fig = px.line(compliance_trend_df, x="YearMonth", y="Compliance %", title="Sign-In Compliance - Last 2 Years")
+    insight_lines = []
+    if len(incomplete_induction_df) > 0:
+        insight_lines.append(
+            f"{len(incomplete_induction_df)} job(s) were signed in but had an incomplete induction - this is commonly a new technician who hasn't attended an NSC site before. "
+            "Recommend reviewing new technician set-up in Verified to reduce this lag."
+        )
+    if len(missing_signin_df) > 0:
+        insight_lines.append(
+            f"{len(missing_signin_df)} job(s) had no matching sign-in at all - follow up required to confirm who attended site and why they didn't sign in."
+        )
+
+    if not insight_lines:
+        signin_insight = "All invoiced jobs this period were fully sign-in compliant."
+    else:
+        signin_insight = "  \n".join(insight_lines)
+
+    st.caption(signin_insight)
+
+    trend_data = compliance_trend_df.dropna(subset=["Compliance %"])
+    trend_fig = px.line(trend_data, x="YearMonth", y="Compliance %", title="Sign-In Compliance - Last 2 Years")
     trend_fig.update_yaxes(range=[0, 100], dtick=20, ticksuffix="%")
     trend_fig.update_xaxes(tickangle=-45)
     trend_fig.update_layout(height=300, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
+    x_min = trend_data["YearMonth"].min()
+    x_max = trend_data["YearMonth"].max()
+    y_min = trend_data["Compliance %"].min()
+    y_max = trend_data["Compliance %"].max()
+    trend_fig.add_scatter(
+        x=[x_min, x_max], y=[y_min, y_max],
+        mode="lines", name="Overall Trend", line=dict(dash="dot", color="grey")
+    )
     st.plotly_chart(trend_fig, use_container_width=True)
 
+    signin_map_fig = px.scatter_geo(
+        this_month_invoices, lat="lat", lon="lon",
+        hover_name="Store Reference",
+        hover_data={"Asset Serial Number": True, "Job Type": True, "lat": False, "lon": False},
+        color="Category",
+        color_discrete_map={"Compliant": "green", "Not Compliant": "red"},
+        scope="world",
+    )
+    signin_map_fig.update_traces(marker=dict(size=10))
+    signin_map_fig.update_geos(
+        lataxis_range=[-45, -9], lonaxis_range=[108, 156],
+        showland=True, landcolor="rgb(235,235,230)", showcountries=True,
+    )
+    signin_map_fig.update_layout(
+        title=dict(text="This Month's Invoiced Jobs - Sign-In Compliance", x=0.5, xanchor="center"),
+        margin={"r":40,"t":50,"l":0,"b":0}, height=450,
+        legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
+    )
+    st.plotly_chart(signin_map_fig, use_container_width=True)
+
+    # ---------- missing sign-ins dropdown ----------
+    if len(missing_signin_df) > 0:
+        missing_signin_df["Store Name"] = missing_signin_df["Store Reference"].map(store_to_name)
+        missing_signin_df["Technician Name"] = "Unknown"
+        with st.expander(f"View {len(missing_signin_df)} invoiced job(s) with no matching sign-in"):
+            missing_display = missing_signin_df[[
+                "Invoice Number", "Invoice Date", "Store Reference", "Store Name", "Asset Serial Number", "Job Type", "Technician Name"
+            ]].sort_values("Invoice Date").copy()
+            missing_display["Invoice Date"] = missing_display["Invoice Date"].dt.date
+            st.dataframe(missing_display)
+    else:
+        st.success("All invoiced jobs this period have a matching sign-in record.")
+
     # ---------- incomplete inductions dropdown ----------
-    if len(incomplete_inductions_df) > 0:
-        with st.expander(f"View {len(incomplete_inductions_df)} incomplete induction record(s)"):
-            incomplete_display = incomplete_inductions_df[[
-                "Site Reference", "Store Name", "Technician Name", "Contractor Company",
-                "Purpose of Visit", "Sign-In Date & Time"
-            ]].sort_values("Sign-In Date & Time")
+    if len(incomplete_induction_df) > 0:
+        incomplete_induction_df["Store Name"] = incomplete_induction_df["Store Reference"].map(store_to_name)
+
+        pair_to_tech = dict(zip(
+            zip(verified_all["Asset Serial"], verified_all["YearMonth"], verified_all["Visit Type"]),
+            verified_all["Technician Name"]
+        ))
+        incomplete_tech_names = []
+        for index, row in incomplete_induction_df.iterrows():
+            pair = (row["Asset Serial Number"], target_year_month, row["Job Type"])
+            incomplete_tech_names.append(pair_to_tech.get(pair, "Unknown"))
+        incomplete_induction_df["Technician Name"] = incomplete_tech_names
+
+        with st.expander(f"View {len(incomplete_induction_df)} job(s) signed in but with incomplete induction"):
+            incomplete_display = incomplete_induction_df[[
+                "Invoice Number", "Invoice Date", "Store Reference", "Store Name", "Asset Serial Number", "Job Type", "Technician Name"
+            ]].sort_values("Invoice Date").copy()
+            incomplete_display["Invoice Date"] = incomplete_display["Invoice Date"].dt.date
             st.dataframe(incomplete_display)
     else:
-        st.success("All technicians completed induction this period.")
+        st.success("No signed-in jobs had incomplete inductions this period.")
+
 
 # ============================================================
 # 13. TAB - PREDICTIVE CAPEX
