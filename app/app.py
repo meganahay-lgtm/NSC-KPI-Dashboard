@@ -43,7 +43,15 @@ import pandas as pd
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("NSC KPI Dashboard")
+
+col_img1, col_title, col_img2 = st.columns([1, 3, 1])
+with col_img1:
+    st.image("assets/baler_image.png", width=150)
+with col_title:
+    st.title("National Supply Co - KPI Dashboard")
+    st.subheader("For Baler & Compactor Contract")
+with col_img2:
+    st.image("assets/compactor_image.png", width=285)
 
 
 # ============================================================
@@ -132,6 +140,13 @@ section = st.sidebar.radio("Go to", [
 # 6. TAB - UPLOAD FILES
 # ============================================================
 if section == "Upload Files":
+
+    st.markdown(
+        "This dashboard tracks servicing compliance, breakdown costs, and asset performance "
+        "for balers and compactors across Nationwide Supply Co's store network. Built for Coretex to manage each month to review with NSC's "
+        "Facilities Operations team."
+    )
+
     st.subheader("Upload this month's files")
     st.write("Drop in the latest export from each of the four source systems to refresh the dashboard.")
 
