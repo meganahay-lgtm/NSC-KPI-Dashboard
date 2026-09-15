@@ -203,8 +203,7 @@ if section == "About Us":
     st.subheader("What this dashboard covers")
 
     coverage_items = [
-        {"icon": "🦺", "title": "Safety Compliance", "description": "Tracks whether contractors sign in and complete induction in Verified before working on site."},
-        {"icon": "💲", "title": "Pricing Compliance", "description": "Checks invoiced preventative service prices against contracted rates by location tier."},
+{"icon": "🦺", "title": "Safety Compliance", "description": "Verified is NSC's contractor safety system, requiring sign-in and induction for every contractor before they can start work on site."},        {"icon": "💲", "title": "Pricing Compliance", "description": "Checks invoiced preventative service prices against contracted rates by location tier."},
         {"icon": "📋", "title": "Asset Accuracy", "description": "Checks that assets on site match what's recorded in the asset register."},
         {"icon": "🗓️", "title": "Planned Servicing", "description": "Tracks whether preventative servicing is happening on schedule across the store network."},
         {"icon": "⚠️", "title": "Breakdowns", "description": "Tracks breakdown frequency, cost and location for balers and compactors."},
@@ -271,13 +270,10 @@ elif section == "Safety Compliance":
     st.subheader("Safety compliance (Verified)")
 
     st.caption(
-        "Verified is a contractor safety and management system used by NSC, requiring the sign in and induction "
-        "of all contractors and visitors to their sites.  \n"
-        "It is important to monitor because incomplete inductions signal that a contractor has worked "
-        "on site without being set up in Verified, where all license and insurance requirements are recorded.  \n"
-        "This raises WHS and compliance risk, including the potential for incidents involving unverified contractors."
+        "Verified logs contractor sign-in and induction before work starts on site.  \n"
+        "Incomplete inductions mean licence and insurance weren't verified, which is a WHS and compliance risk."
     )
-    st.write("")
+    st.divider()
 
     target_year_month = AS_OF_DATE.strftime("%Y-%m")
     verified_all = verified_df.copy()
@@ -368,7 +364,7 @@ elif section == "Safety Compliance":
 
     st.caption(signin_insight)
 
-    st.write("")
+    st.divider()
 
     trend_data = compliance_trend_df.dropna(subset=["Compliance %"])
     trend_fig = px.line(trend_data, x="YearMonth", y="Compliance %", title="Sign-In Compliance - Last 2 Years")
@@ -385,7 +381,7 @@ elif section == "Safety Compliance":
     )
     st.plotly_chart(trend_fig, use_container_width=True)
 
-    st.write("")
+    st.divider()
 
     # ---------- map ----------
     signin_map_fig = px.scatter_geo(
@@ -462,7 +458,7 @@ elif section == "Pricing Compliance":
         "This catches over/undercharges early, before they compound across the store network."
     )
 
-    st.write("")
+    st.divider()
 
     # ---------- metric logic ----------
     RATE = {
@@ -546,6 +542,11 @@ elif section == "Pricing Compliance":
 
     st.plotly_chart(scatter_fig, use_container_width=True)
 
+    st.caption(
+        "Each dot is an invoiced preventative service; dashed lines mark the contracted rate per asset type and location tier.  \n"
+        "Red dots are flagged (priced above or below the rate) - Coretex need to review why they charged NSC a rate that is outside the contracted scope.  \n"
+        "Over charged invoices may require accounts to issue a credit note."
+    )
 
 
 
@@ -563,7 +564,7 @@ elif section == "Asset Accuracy":
         "This keeps servicing, safety compliance and billing accurate, since they all rely on knowing exactly what's on site."
     )
 
-    st.write("")
+    st.divider()
 
     # ---------- metric logic ----------
     nsc_serials = set(nsc_df["Serial Number"])
@@ -736,7 +737,7 @@ elif section == "Planned Servicing":
         "This flags outstanding services early, before a missed service turns into an unplanned breakdown."
     )
 
-    st.write("")
+    st.divider()
 
     # ---------- metric logic ----------
     target_month = AS_OF_DATE.strftime("%b")
@@ -833,6 +834,9 @@ elif section == "Planned Servicing":
             return "Outstanding"
 
     servicing_map_df["Category"] = servicing_map_df["Serial Number"].apply(classify_servicing)
+
+
+    st.divider()
 
     # ---------- map visual ----------
     servicing_fig = px.scatter_geo(
@@ -932,7 +936,7 @@ elif section == "Breakdowns-Balers":
     count_delta = ((breakdowns_count - breakdowns_2yr_avg) / breakdowns_2yr_avg * 100) if breakdowns_2yr_avg else 0
     spend_delta = ((spend_this_month - spend_2yr_avg) / spend_2yr_avg * 100) if spend_2yr_avg else 0
 
-    st.write("")
+    st.divider()
 
     # ---------- metrics row ----------
     col1, col2, col3, col4 = st.columns(4)
@@ -941,7 +945,7 @@ elif section == "Breakdowns-Balers":
     col3.metric("Spend this month", f"${spend_this_month:,.0f}", delta=f"{spend_delta:+.0f}% vs 2yr avg")
     col4.metric("2yr avg spend", f"${spend_2yr_avg:,.0f}")
 
-    st.write("")
+    st.divider()
 
     # ---------- data-driven insight ----------
     repeat_counts = this_month_breakdowns["Asset Serial Number"].value_counts()
@@ -994,7 +998,7 @@ elif section == "Breakdowns-Balers":
         f"- **Repairs costing over 2x the average (${avg_repair_cost:,.0f}):** {high_cost_result}"
     )
 
-    st.write("")
+    st.divider()
 
     colA, colSpacer, colB = st.columns([4, 1, 5])
 
@@ -1015,6 +1019,8 @@ elif section == "Breakdowns-Balers":
         trend_fig.update_xaxes(tickangle=-45)
         trend_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
         st.plotly_chart(trend_fig, use_container_width=True)
+
+    st.divider()
 
     # ---------- map of breakdown locations ----------
     map_fig = px.scatter_geo(
@@ -1104,7 +1110,7 @@ elif section == "Breakdowns-Compactors":
     count_delta = ((breakdowns_count - breakdowns_2yr_avg) / breakdowns_2yr_avg * 100) if breakdowns_2yr_avg else 0
     spend_delta = ((spend_this_month - spend_2yr_avg) / spend_2yr_avg * 100) if spend_2yr_avg else 0
 
-    st.write("")
+    st.divider()
 
     # ---------- metrics row ----------
     col1, col2, col3, col4 = st.columns(4)
@@ -1113,7 +1119,7 @@ elif section == "Breakdowns-Compactors":
     col3.metric("Spend this month", f"${spend_this_month:,.0f}", delta=f"{spend_delta:+.0f}% vs 2yr avg")
     col4.metric("2yr avg spend", f"${spend_2yr_avg:,.0f}")
 
-    st.write("")
+    st.divider()
 
     # ---------- data-driven insight ----------
     repeat_counts = this_month_breakdowns["Asset Serial Number"].value_counts()
@@ -1166,7 +1172,7 @@ elif section == "Breakdowns-Compactors":
         f"- **Repairs costing over 2x the average (${avg_repair_cost:,.0f}):** {high_cost_result}"
     )
 
-    st.write("")
+    st.divider()
 
     colA, colSpacer, colB = st.columns([4, 1, 5])
 
@@ -1187,6 +1193,8 @@ elif section == "Breakdowns-Compactors":
         trend_fig.update_xaxes(tickangle=-45)
         trend_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
         st.plotly_chart(trend_fig, use_container_width=True)
+
+    st.divider()
 
     # ---------- map of breakdown locations ----------
     map_fig = px.scatter_geo(
@@ -1232,7 +1240,7 @@ elif section == "Predictive Capex":
         "Units are flagged as high risk based on their age, location and breakdown history."
     )
 
-    st.write("")
+    st.divider()
 
     # ---------- reactive model (regression) ----------
     from sklearn.linear_model import LinearRegression
