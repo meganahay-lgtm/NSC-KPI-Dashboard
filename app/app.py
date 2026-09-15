@@ -104,7 +104,24 @@ def extract_coords(row):
     coords = get_suburb_coords(row["Suburb"], row["State"])
     return pd.Series({"lat": coords[0], "lon": coords[1]})
 
-nsc_df = pd.read_excel("data/nationwide_supply_asset_list.xlsx")
+UPLOAD_KEYS = ["asset_file", "coretex_file", "aroflo_file", "verified_file", "lifetime_file"]
+using_uploaded_files = all(st.session_state.get(key) is not None for key in UPLOAD_KEYS)
+
+if using_uploaded_files:
+    for key in UPLOAD_KEYS:
+        st.session_state[key].seek(0)
+    nsc_df = pd.read_excel(st.session_state["asset_file"])
+    coretex_df = pd.read_excel(st.session_state["coretex_file"])
+    aroflo_df = pd.read_excel(st.session_state["aroflo_file"])
+    verified_df = pd.read_excel(st.session_state["verified_file"])
+    lifetime_df = pd.read_excel(st.session_state["lifetime_file"], sheet_name="Lifetime Spend by Year")
+else:
+    nsc_df = pd.read_excel("data/nationwide_supply_asset_list.xlsx")
+    coretex_df = pd.read_excel("data/coretex_equipment_records.xlsx")
+    aroflo_df = pd.read_excel("data/aroflo_invoicing_report.xlsx")
+    verified_df = pd.read_excel("data/verified_signin_records.xlsx")
+    lifetime_df = pd.read_excel("data/lifetime_maintenance_spend.xlsx", sheet_name="Lifetime Spend by Year")
+
 nsc_df["Asset Type"] = nsc_df["Asset Make/Model"].str.split(" - ").str[0]
 nsc_df[["lat", "lon"]] = nsc_df.apply(extract_coords, axis=1)
 nsc_df["Installation Date"] = pd.to_datetime(nsc_df["Installation Date"])  # needed by Planned Servicing, Breakdowns AND Predictive Capex
@@ -134,12 +151,8 @@ def classify_tier(suburb):
 nsc_df["Location Tier"] = nsc_df["Suburb"].apply(classify_tier)
 nsc_df["Pricing Tier"] = nsc_df["Location Tier"].replace({"Near-Regional": "Regional", "Far-Regional": "Regional"})
 
-coretex_df = pd.read_excel("data/coretex_equipment_records.xlsx")
-
-aroflo_df = pd.read_excel("data/aroflo_invoicing_report.xlsx")
 aroflo_df["Invoice Date"] = pd.to_datetime(aroflo_df["Invoice Date"])
 
-verified_df = pd.read_excel("data/verified_signin_records.xlsx")
 verified_df["Sign-In Date"] = pd.to_datetime(verified_df["Sign-In Date & Time"])
 verified_df["Asset Serial"] = verified_df["Purpose of Visit"].str.split("Asset ").str[1]
 verified_df["Visit Type"] = verified_df["Purpose of Visit"].str.split(" - Asset").str[0]
@@ -207,35 +220,34 @@ if section == "About Us":
 elif section == "Upload Files":
 
     st.subheader("Upload this month's files")
+
     st.write("Drop in the latest export from each of the four source systems to refresh the dashboard.")
 
     row1_a, row1_b = st.columns(2)
     with row1_a:
-        asset_file = st.file_uploader("NSC asset register", type=["xlsx"])
+        asset_file = st.file_uploader("NSC asset register", type=["xlsx"], key="asset_file")
     with row1_b:
-        coretex_file = st.file_uploader("Coretex equipment records", type=["xlsx"])
+        coretex_file = st.file_uploader("Coretex equipment records", type=["xlsx"], key="coretex_file")
 
     row2_a, row2_b = st.columns(2)
     with row2_a:
-        aroflo_file = st.file_uploader("Aroflo 2yr invoicing report", type=["xlsx"])
+        aroflo_file = st.file_uploader("Aroflo 2yr invoicing report", type=["xlsx"], key="aroflo_file")
     with row2_b:
-        lifetime_file = st.file_uploader("Aroflo lifetime maintenance spend", type=["xlsx"])
+        lifetime_file = st.file_uploader("Aroflo lifetime maintenance spend", type=["xlsx"], key="lifetime_file")
 
     row3_a, row3_b = st.columns(2)
     with row3_a:
-        verified_file = st.file_uploader("Verified sign-in records", type=["xlsx"])
+        verified_file = st.file_uploader("Verified sign-in records", type=["xlsx"], key="verified_file")
 
     uploaded = [asset_file, coretex_file, aroflo_file, verified_file, lifetime_file]
     st.progress(sum(f is not None for f in uploaded) / len(uploaded))
 
     if all(uploaded):
-        st.success("All 5 files uploaded")
+        st.success("All 5 files uploaded - the dashboard is now using this data instead of the local sample files.")
     else:
-        st.info(f"{sum(f is not None for f in uploaded)} of 5 files uploaded")
+        st.info(f"{sum(f is not None for f in uploaded)} of 5 files uploaded - showing local sample data until all 5 are provided.")
 
-    st.caption("Note: uploaded files aren't wired into the dashboard's calculations yet - every tab currently reads from the local data/ folder. Connecting these uploads to the actual logic is a separate piece of work still to come.")
     st.info("Before reviewing the dashboard, set the **Reporting period end date** in the sidebar to match the month these files cover - the on-time rates and trend charts are calculated relative to that date.")
-
 
 
 
@@ -483,7 +495,7 @@ elif section == "Pricing Compliance":
     else:
         total_variance = (flagged_df["Amount (AUD)"] - flagged_df["Expected Price"]).sum()
         if total_variance > 0:
-            insight_caption = f"{len(flagged_df)} invoice(s) flagged, resulting in a total overcharge of ${total_variance:,.0f} - recommend following up with Coretex Waste Solutions."
+            insight_caption = f"{len(flagged_df)} invoice(s) flagged, resulting in a total overcharge of ${total_variance:,.0f} - Coretex to review with accounts dept."
         elif total_variance < 0:
             insight_caption = f"{len(flagged_df)} invoice(s) flagged, resulting in a total undercharge of ${abs(total_variance):,.0f}."
         else:
@@ -1214,7 +1226,6 @@ elif section == "Predictive Capex":
     # ---------- reactive model (regression) ----------
     from sklearn.linear_model import LinearRegression
 
-    lifetime_df = pd.read_excel("data/lifetime_maintenance_spend.xlsx", sheet_name="Lifetime Spend by Year")
     lifetime_df["Asset Type"] = lifetime_df["Asset"].str.split(" - ").str[0]
     serial_to_suburb = dict(zip(nsc_df["Serial Number"], nsc_df["Suburb"]))
     lifetime_df["Suburb"] = lifetime_df["Serial"].map(serial_to_suburb)
