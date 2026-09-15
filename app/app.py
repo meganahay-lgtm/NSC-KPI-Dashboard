@@ -244,7 +244,9 @@ elif section == "Upload Files":
 # 8. TAB - SAFETY COMPLIANCE
 # ============================================================
 elif section == "Safety Compliance":
+
     st.subheader("Safety compliance (Verified)")
+
     st.caption(
         "Verified is a contractor safety and management system used by NSC, requiring the sign in and induction "
         "of all contractors and visitors to their sites.  \n"
@@ -318,6 +320,8 @@ elif section == "Safety Compliance":
     this_month_invoices["lat"] = this_month_invoices["Store Reference"].map(store_to_lat)
     this_month_invoices["lon"] = this_month_invoices["Store Reference"].map(store_to_lon)
 
+    st.write("")
+
     col1, col2, col3 = st.columns(3)
     col1.metric("Fully sign-in compliant", f"{signed_in_count} of {len(this_month_invoices)} invoiced jobs")
     col2.metric("This month compliance", f"{compliance_rate_this_month:.1f}%", delta=f"{compliance_rate_this_month - compliance_2yr_avg:.1f}% vs 2yr avg")
@@ -341,6 +345,8 @@ elif section == "Safety Compliance":
 
     st.caption(signin_insight)
 
+    st.write("")
+
     trend_data = compliance_trend_df.dropna(subset=["Compliance %"])
     trend_fig = px.line(trend_data, x="YearMonth", y="Compliance %", title="Sign-In Compliance - Last 2 Years")
     trend_fig.update_yaxes(range=[0, 100], dtick=20, ticksuffix="%")
@@ -356,6 +362,9 @@ elif section == "Safety Compliance":
     )
     st.plotly_chart(trend_fig, use_container_width=True)
 
+    st.write("")
+
+    # ---------- map ----------
     signin_map_fig = px.scatter_geo(
         this_month_invoices, lat="lat", lon="lon",
         hover_name="Store Reference",
@@ -421,6 +430,17 @@ elif section == "Safety Compliance":
 # ============================================================
 elif section == "Pricing Compliance":
 
+    st.subheader("Pricing compliance")
+
+    st.caption(
+        "The contract has agreed rates for preventative services for each asset type and location tier (Metro/Regional).  \n"
+        "This dashboard reconciles the invoices against the contract rates to ensure compliance, and picks up any manual "
+        "invoicing errors or unauthorised increases.  \n"
+        "This catches over/undercharges early, before they compound across the store network."
+    )
+
+    st.write("")
+
     # ---------- metric logic ----------
     RATE = {
         ("Baler", "Metro"): 340, ("Baler", "Regional"): 408,
@@ -445,14 +465,17 @@ elif section == "Pricing Compliance":
     flagged_df = prev_df[prev_df["Amount (AUD)"] != prev_df["Expected Price"]].copy()
 
      # ---------- metrics row ----------
-    st.subheader("Pricing compliance")
 
     compliance_rate = (len(prev_df) - len(flagged_df)) / len(prev_df) * 100
+
+    st.write("")
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Invoices flagged", len(flagged_df))
     col2.metric("Preventative invoices checked", len(prev_df))
     col3.metric("Pricing compliance rate", f"{compliance_rate:.1f}%")
+
+    st.write("")
 
     # ---------- pricing insight caption ----------
     if len(flagged_df) == 0:
@@ -508,6 +531,16 @@ elif section == "Pricing Compliance":
 # 10. TAB - ASSET ACCURACY
 # ============================================================
 elif section == "Asset Accuracy":
+
+    st.subheader("Asset register accuracy")
+
+    st.caption(
+        "NSC's asset register and Coretex's equipment records should always match, since both track what's actually installed on site.  \n"
+        "This dashboard reconciles the two systems to catch assets that are missing, newly added, or removed from either one.  \n"
+        "This keeps servicing, safety compliance and billing accurate, since they all rely on knowing exactly what's on site."
+    )
+
+    st.write("")
 
     # ---------- metric logic ----------
     nsc_serials = set(nsc_df["Serial Number"])
@@ -598,7 +631,6 @@ elif section == "Asset Accuracy":
     ], ignore_index=True)
 
     # ---------- summary table + map ----------
-    st.subheader("Asset register accuracy")
     st.metric("Asset register accuracy", f"{asset_match_rate:.1f}%")
 
     asset_changes = pd.DataFrame({
@@ -673,6 +705,16 @@ elif section == "Asset Accuracy":
 # ============================================================
 elif section == "Planned Servicing":
 
+    st.subheader("Planned servicing")
+
+    st.caption(
+        "Each asset has a scheduled preventative service month based on its install date.  \n"
+        "This dashboard checks whether that servicing was actually completed on time, and tracks the trend over the last 2 years.  \n"
+        "This flags outstanding services early, before a missed service turns into an unplanned breakdown."
+    )
+
+    st.write("")
+
     # ---------- metric logic ----------
     target_month = AS_OF_DATE.strftime("%b")
     scheduled_serials = set(nsc_df[nsc_df[target_month].notna()]["Serial Number"])
@@ -714,7 +756,6 @@ elif section == "Planned Servicing":
     servicing_2yr_avg_rate = monthly_trend["On Time %"].mean()
 
     # ---------- metrics row ----------
-    st.subheader("Planned servicing")
 
     completed_stores = set(nsc_df[nsc_df["Serial Number"].isin(on_time_serials)]["Store #"])
     outstanding_stores = set(nsc_df[nsc_df["Serial Number"].isin(outstanding_serials)]["Store #"])
@@ -726,6 +767,8 @@ elif section == "Planned Servicing":
     col3.metric("Completed", f"{len(completed_stores)} stores")
     col4.metric("Outstanding", f"{len(outstanding_stores)} stores")
 
+    st.write("")
+
     colA, colSpacer, colB = st.columns([4, 1, 5])
 
     rate_diff = servicing_on_time_rate - servicing_2yr_avg_rate
@@ -735,6 +778,8 @@ elif section == "Planned Servicing":
         trend_caption = "Above average result."
     else:
         trend_caption = "In line with the 2-year average."
+
+    st.write("")
 
     # ---------- on-time trend line chart ----------
     with colA:
@@ -1156,6 +1201,16 @@ elif section == "Breakdowns-Compactors":
 # ============================================================
 elif section == "Predictive Capex":
 
+    st.subheader("Predictive capex - next 12 months")
+
+    st.caption(
+        "Ageing or high-maintenance assets are a known cost risk, so it helps to plan for replacement ahead of time rather than reacting to a major breakdown.  \n"
+        "This dashboard forecasts capex needs for the next 12 months - proactive planned replacements and reactive unplanned breakdown spend.  \n"
+        "Units are flagged as high risk based on their age, location and breakdown history."
+    )
+
+    st.write("")
+
     # ---------- reactive model (regression) ----------
     from sklearn.linear_model import LinearRegression
 
@@ -1238,7 +1293,6 @@ elif section == "Predictive Capex":
     proactive_capex_forecast = predict_df[predict_df["Predicted High Risk"]]["Current Replacement Cost"].sum()
     high_risk_assets_df = predict_df[predict_df["Predicted High Risk"]]
 
-    st.subheader("Predictive capex - next 12 months")
     col1, col2 = st.columns(2)
 
     # ---------- how this is calculated explainer ----------
