@@ -192,8 +192,8 @@ if section == "About Us":
     st.subheader("About this dashboard")
 
     st.markdown(
-        "This dashboard tracks servicing compliance, breakdown costs, and asset performance "
-        "for balers and compactors across Nationwide Supply Co's store network."
+        "This dashboard tracks safety, pricing, and servicing compliance, plus asset accuracy, "
+        "breakdown costs, and capex forecasting, for balers and compactors across Nationwide Supply Co's store network."
     )
     st.markdown(
         "Built for Coretex to manage each month to review with NSC's Facilities Operations team."
@@ -201,15 +201,26 @@ if section == "About Us":
 
     st.write("")
     st.subheader("What this dashboard covers")
-    st.markdown(
-        "- **Safety Compliance** - tracks whether contractors sign in and complete induction in Verified before working on site\n"
-        "- **Pricing Compliance** - checks invoiced preventative service prices against contracted rates by location tier\n"
-        "- **Asset Accuracy** - checks that assets on site match what's recorded in the asset register\n"
-        "- **Planned Servicing** - tracks whether preventative servicing is happening on schedule\n"
-        "- **Breakdowns** - tracks breakdown frequency, cost and location for balers and compactors\n"
-        "- **Predictive Capex** - flags assets likely to need replacement based on cost and age trends"
-    )
 
+    coverage_items = [
+        {"icon": "🦺", "title": "Safety Compliance", "description": "Tracks whether contractors sign in and complete induction in Verified before working on site."},
+        {"icon": "💲", "title": "Pricing Compliance", "description": "Checks invoiced preventative service prices against contracted rates by location tier."},
+        {"icon": "📋", "title": "Asset Accuracy", "description": "Checks that assets on site match what's recorded in the asset register."},
+        {"icon": "🗓️", "title": "Planned Servicing", "description": "Tracks whether preventative servicing is happening on schedule across the store network."},
+        {"icon": "⚠️", "title": "Breakdowns", "description": "Tracks breakdown frequency, cost and location for balers and compactors."},
+        {"icon": "📈", "title": "Predictive Capex", "description": "Flags assets likely to need replacement based on cost and age trends."},
+    ]
+
+    row1 = st.columns(3)
+    row2 = st.columns(3)
+    card_columns = row1 + row2
+
+    for index, item in enumerate(coverage_items):
+        with card_columns[index]:
+            with st.container(border=True):
+                st.markdown(f"### {item['icon']}")
+                st.markdown(f"**{item['title']}**")
+                st.write(item["description"])
 
 
 
