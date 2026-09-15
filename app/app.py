@@ -24,8 +24,21 @@
 #        - outstanding by state bar chart
 #        - completed/outstanding map
 #        - completed/outstanding dropdowns
-#  12. Tab - Breakdowns (balers + compactors side by side)
-#  13. Tab - Predictive Capex
+#  12. Tab - Breakdowns-Balers
+#        - metric logic
+#        - metrics row
+#        - data-driven insight (repeat offenders / high-cost repairs)
+#        - spend trend line chart + by-state bar chart
+#        - map
+#        - breakdown details dropdown
+#  13. Tab - Breakdowns-Compactors
+#        - metric logic
+#        - metrics row
+#        - data-driven insight (repeat offenders / high-cost repairs)
+#        - spend trend line chart + by-state bar chart
+#        - map
+#        - breakdown details dropdown
+#  14. Tab - Predictive Capex
 #        - reactive model (regression)
 #        - proactive model (classification)
 #        - how this is calculated explainer
@@ -33,6 +46,8 @@
 #        - capex by state bar chart
 #        - recommended replacements map
 # ============================================================
+
+
 
 
 # ============================================================
@@ -92,7 +107,7 @@ def extract_coords(row):
 nsc_df = pd.read_excel("data/nationwide_supply_asset_list.xlsx")
 nsc_df["Asset Type"] = nsc_df["Asset Make/Model"].str.split(" - ").str[0]
 nsc_df[["lat", "lon"]] = nsc_df.apply(extract_coords, axis=1)
-nsc_df["Installation Date"] = pd.to_datetime(nsc_df["Installation Date"])  # needed by both Planned Servicing AND Predictive Capex
+nsc_df["Installation Date"] = pd.to_datetime(nsc_df["Installation Date"])  # needed by Planned Servicing, Breakdowns AND Predictive Capex
 
 NEAR_REGIONAL_SUBURBS = {
     "Newcastle", "Wollongong", "Maitland", "Nowra", "Goulburn",
@@ -149,7 +164,8 @@ recency_cutoff = AS_OF_DATE - pd.Timedelta(days=60)
 # ============================================================
 section = st.sidebar.radio("Go to", [
     "About Us", "Upload Files", "Safety Compliance", "Pricing Compliance",
-    "Asset Accuracy", "Planned Servicing", "Breakdowns", "Predictive Capex"
+    "Asset Accuracy", "Planned Servicing", "Breakdowns-Balers", "Breakdowns-Compactors",
+    "Predictive Capex"
 ])
 
 
@@ -792,67 +808,351 @@ elif section == "Planned Servicing":
 
 
 # ============================================================
-# 12. TAB - BREAKDOWNS (balers + compactors side by side)
+# 12. TAB - BREAKDOWNS-BALERS
 # ============================================================
-elif section == "Breakdowns":
-    st.subheader("Breakdowns")
+elif section == "Breakdowns-Balers":
+    st.subheader("Breakdowns - Balers")
 
-    col_baler, col_compactor = st.columns(2)
+    st.caption(
+        "Tracks unplanned breakdown repairs for balers - frequency, cost and location this month versus the 2-year average.  \n"
+        "It's important to monitor because breakdowns are unplanned and unbudgeted, unlike preventative servicing, and can signal "
+        "a specific unit needing escalation (repeat failures, a major fault) rather than routine wear and tear.  \n"
+        "Tracking this also helps separate one-off repair costs from patterns worth investigating further with Facility Managers."
+    )
 
-    with col_baler:
-        st.subheader("Balers")
-        col1, col2 = st.columns(2)
-        col1.metric("Breakdowns this month", "11", delta="+18% vs 2yr avg")
-        col2.metric("Spend this month", "$14.2k", delta="+22% vs 2yr avg")
+    # ---------- data prep ----------
+    serial_to_type = dict(zip(nsc_df["Serial Number"], nsc_df["Asset Type"]))
+    store_to_state = dict(zip(nsc_df["Store #"], nsc_df["State"]))
+    store_to_lat = dict(zip(nsc_df["Store #"], nsc_df["lat"]))
+    store_to_lon = dict(zip(nsc_df["Store #"], nsc_df["lon"]))
+    serial_to_install_date = dict(zip(nsc_df["Serial Number"], nsc_df["Installation Date"]))
 
-        st.write("Breakdowns by state")
-        baler_breakdown_state = pd.DataFrame({
-            "State": ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"],
-            "Breakdowns": [3, 2, 2, 1, 1, 1, 0, 1]
+    breakdown_df = aroflo_df[aroflo_df["Job Type"] == "Breakdown Repair"].copy()
+    breakdown_df["Asset Type"] = breakdown_df["Asset Serial Number"].map(serial_to_type)
+    breakdown_df["State"] = breakdown_df["Store Reference"].map(store_to_state)
+    breakdown_df["lat"] = breakdown_df["Store Reference"].map(store_to_lat)
+    breakdown_df["lon"] = breakdown_df["Store Reference"].map(store_to_lon)
+
+    type_breakdown_df = breakdown_df[breakdown_df["Asset Type"] == "Baler"]
+
+    target_year_month = AS_OF_DATE.strftime("%Y-%m")
+    this_month_breakdowns = type_breakdown_df[
+        type_breakdown_df["Invoice Date"].dt.strftime("%Y-%m") == target_year_month
+    ]
+
+    # ---------- 2yr trend & averages ----------
+    end_period = AS_OF_DATE.to_period("M")
+    start_period = end_period - 23
+    period_range = pd.period_range(start_period, end_period, freq="M")
+
+    trend_rows = []
+    for period in period_range:
+        year_month = str(period)
+        period_df = type_breakdown_df[type_breakdown_df["Invoice Date"].dt.strftime("%Y-%m") == year_month]
+        trend_rows.append({
+            "YearMonth": year_month,
+            "Breakdowns": len(period_df),
+            "Spend": period_df["Amount (AUD)"].sum()
         })
-        st.bar_chart(baler_breakdown_state.set_index("State"))
+    trend_df = pd.DataFrame(trend_rows)
+    breakdowns_2yr_avg = trend_df["Breakdowns"].mean()
+    spend_2yr_avg = trend_df["Spend"].mean()
 
-        st.write("Where breakdowns happened")
-        baler_map = pd.DataFrame({"lat": [-33.87, -37.81, -27.47], "lon": [151.21, 144.96, 153.02]})
-        st.map(baler_map)
+    breakdowns_count = len(this_month_breakdowns)
+    spend_this_month = this_month_breakdowns["Amount (AUD)"].sum()
 
-        st.write("Spend trend")
-        baler_spend_trend = pd.DataFrame({
-            "Month": ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
-            "Spend": [9800, 11200, 9500, 12800, 10300, 14200]
-        })
-        st.line_chart(baler_spend_trend.set_index("Month"))
+    count_delta = ((breakdowns_count - breakdowns_2yr_avg) / breakdowns_2yr_avg * 100) if breakdowns_2yr_avg else 0
+    spend_delta = ((spend_this_month - spend_2yr_avg) / spend_2yr_avg * 100) if spend_2yr_avg else 0
 
-    with col_compactor:
-        st.subheader("Compactors")
-        col1, col2 = st.columns(2)
-        col1.metric("Breakdowns this month", "3", delta="-10% vs 2yr avg")
-        col2.metric("Spend this month", "$8.1k", delta="+5% vs 2yr avg")
+    st.write("")
 
-        st.write("Breakdowns by state")
-        compactor_breakdown_state = pd.DataFrame({
-            "State": ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"],
-            "Breakdowns": [1, 1, 0, 1, 0, 0, 0, 0]
-        })
-        st.bar_chart(compactor_breakdown_state.set_index("State"))
+    # ---------- metrics row ----------
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Breakdowns this month", breakdowns_count, delta=f"{count_delta:+.0f}% vs 2yr avg")
+    col2.metric("2yr avg breakdowns", f"{breakdowns_2yr_avg:.1f}")
+    col3.metric("Spend this month", f"${spend_this_month:,.0f}", delta=f"{spend_delta:+.0f}% vs 2yr avg")
+    col4.metric("2yr avg spend", f"${spend_2yr_avg:,.0f}")
 
-        st.write("Where breakdowns happened")
-        compactor_map = pd.DataFrame({"lat": [-33.87, -31.95], "lon": [151.21, 115.86]})
-        st.map(compactor_map)
+    st.write("")
 
-        st.write("Spend trend")
-        compactor_spend_trend = pd.DataFrame({
-            "Month": ["Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
-            "Spend": [7000, 7500, 6400, 7100, 7700, 8100]
-        })
-        st.line_chart(compactor_spend_trend.set_index("Month"))
+    # ---------- data-driven insight ----------
+    repeat_counts = this_month_breakdowns["Asset Serial Number"].value_counts()
+    repeat_offenders = repeat_counts[repeat_counts > 1]
+
+    young_repeat_serials = []
+    young_repeat_labels = []
+    older_repeat_serials = []
+    older_repeat_labels = []
+    for serial, count in repeat_offenders.items():
+        install_date = serial_to_install_date.get(serial)
+        age_years = (AS_OF_DATE - install_date).days / 365.25 if pd.notna(install_date) else None
+        label = f"{serial} ({count}x)"
+        if age_years is not None and age_years <= 3:
+            young_repeat_serials.append(serial)
+            young_repeat_labels.append(label)
+        else:
+            older_repeat_serials.append(serial)
+            older_repeat_labels.append(label)
+
+    if young_repeat_serials:
+        young_spend = this_month_breakdowns[this_month_breakdowns["Asset Serial Number"].isin(young_repeat_serials)]["Amount (AUD)"].sum()
+        young_result = f"{', '.join(young_repeat_labels)} (${young_spend:,.0f}) - recommend a warranty claim review."
+    else:
+        young_result = "None this month."
+
+    if older_repeat_serials:
+        older_spend = this_month_breakdowns[this_month_breakdowns["Asset Serial Number"].isin(older_repeat_serials)]["Amount (AUD)"].sum()
+        older_result = f"{', '.join(older_repeat_labels)} (${older_spend:,.0f}) - likely a fault-finding process over multiple attendances or wear-part replacement."
+    else:
+        older_result = "None this month."
+
+    avg_repair_cost = type_breakdown_df["Amount (AUD)"].mean()
+    high_cost_repairs = this_month_breakdowns[
+        (this_month_breakdowns["Amount (AUD)"] > avg_repair_cost * 2) &
+        (~this_month_breakdowns["Asset Serial Number"].isin(repeat_offenders.index))
+    ]
+    if len(high_cost_repairs) > 0:
+        high_cost_list = ", ".join(
+            f"{row['Asset Serial Number']} (${row['Amount (AUD)']:,.0f})"
+            for index, row in high_cost_repairs.iterrows()
+        )
+        high_cost_result = f"{high_cost_list} - likely a major part replacement rather than a routine repair."
+    else:
+        high_cost_result = "None this month."
+
+    st.markdown(
+        f"- **Repeat breakdowns, 3yrs old or less (warranty candidates):** {young_result}\n"
+        f"- **Repeat breakdowns, over 3yrs old (fault-finding/wear parts):** {older_result}\n"
+        f"- **Repairs costing over 2x the average (${avg_repair_cost:,.0f}):** {high_cost_result}"
+    )
+
+    st.write("")
+
+    colA, colSpacer, colB = st.columns([4, 1, 5])
+
+    # ---------- breakdowns by state bar chart ----------
+    with colA:
+        state_fig = px.bar(
+            this_month_breakdowns.groupby("State").size().reset_index(name="Breakdowns"),
+            x="State", y="Breakdowns", title="Breakdowns by State (This Month)"
+        )
+        state_fig.update_yaxes(dtick=1)
+        state_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":0}, xaxis_title=None, yaxis_title=None)
+        st.plotly_chart(state_fig, use_container_width=True)
+
+    # ---------- spend trend line chart ----------
+    with colB:
+        trend_fig = px.line(trend_df, x="YearMonth", y="Spend", title="Breakdown Spend - Last 2 Years")
+        trend_fig.update_yaxes(tickprefix="$")
+        trend_fig.update_xaxes(tickangle=-45)
+        trend_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
+        st.plotly_chart(trend_fig, use_container_width=True)
+
+    # ---------- map of breakdown locations ----------
+    map_fig = px.scatter_geo(
+        this_month_breakdowns, lat="lat", lon="lon",
+        hover_name="Store Reference",
+        hover_data={"Asset Serial Number": True, "Amount (AUD)": True, "lat": False, "lon": False},
+        scope="world",
+    )
+    map_fig.update_traces(marker=dict(size=10, color="red"))
+    map_fig.update_geos(
+        lataxis_range=[-45, -9], lonaxis_range=[108, 156],
+        showland=True, landcolor="rgb(235,235,230)", showcountries=True,
+    )
+    map_fig.update_layout(
+        title=dict(text="This Month's Baler Breakdowns - Locations", x=0.5, xanchor="center"),
+        margin={"r":40,"t":50,"l":0,"b":0}, height=450,
+    )
+    st.plotly_chart(map_fig, use_container_width=True)
+
+    # ---------- breakdown details dropdown ----------
+    with st.expander(f"View {len(this_month_breakdowns)} baler breakdown(s) this month"):
+        breakdown_display = this_month_breakdowns[[
+            "Invoice Number", "Invoice Date", "Store Reference", "Store Name",
+            "Asset Serial Number", "Service Description", "Amount (AUD)"
+        ]].sort_values("Invoice Date").copy()
+        breakdown_display["Invoice Date"] = breakdown_display["Invoice Date"].dt.date
+        st.dataframe(breakdown_display)
 
 
 
 
 
 # ============================================================
-# 13. TAB - PREDICTIVE CAPEX
+# 13. TAB - BREAKDOWNS-COMPACTORS
+# ============================================================
+elif section == "Breakdowns-Compactors":
+    st.subheader("Breakdowns - Compactors")
+
+    st.caption(
+        "Tracks unplanned breakdown repairs for compactors - frequency, cost and location this month versus the 2-year average.  \n"
+        "It's important to monitor because breakdowns are unplanned and unbudgeted, unlike preventative servicing, and can signal "
+        "a specific unit needing escalation (repeat failures, a major fault) rather than routine wear and tear.  \n"
+        "Tracking this also helps separate one-off repair costs from patterns worth investigating further with Facility Managers."
+    )
+
+    # ---------- data prep ----------
+    serial_to_type = dict(zip(nsc_df["Serial Number"], nsc_df["Asset Type"]))
+    store_to_state = dict(zip(nsc_df["Store #"], nsc_df["State"]))
+    store_to_lat = dict(zip(nsc_df["Store #"], nsc_df["lat"]))
+    store_to_lon = dict(zip(nsc_df["Store #"], nsc_df["lon"]))
+    serial_to_install_date = dict(zip(nsc_df["Serial Number"], nsc_df["Installation Date"]))
+
+    breakdown_df = aroflo_df[aroflo_df["Job Type"] == "Breakdown Repair"].copy()
+    breakdown_df["Asset Type"] = breakdown_df["Asset Serial Number"].map(serial_to_type)
+    breakdown_df["State"] = breakdown_df["Store Reference"].map(store_to_state)
+    breakdown_df["lat"] = breakdown_df["Store Reference"].map(store_to_lat)
+    breakdown_df["lon"] = breakdown_df["Store Reference"].map(store_to_lon)
+
+    type_breakdown_df = breakdown_df[breakdown_df["Asset Type"] == "Compactor"]
+
+    target_year_month = AS_OF_DATE.strftime("%Y-%m")
+    this_month_breakdowns = type_breakdown_df[
+        type_breakdown_df["Invoice Date"].dt.strftime("%Y-%m") == target_year_month
+    ]
+
+    # ---------- 2yr trend & averages ----------
+    end_period = AS_OF_DATE.to_period("M")
+    start_period = end_period - 23
+    period_range = pd.period_range(start_period, end_period, freq="M")
+
+    trend_rows = []
+    for period in period_range:
+        year_month = str(period)
+        period_df = type_breakdown_df[type_breakdown_df["Invoice Date"].dt.strftime("%Y-%m") == year_month]
+        trend_rows.append({
+            "YearMonth": year_month,
+            "Breakdowns": len(period_df),
+            "Spend": period_df["Amount (AUD)"].sum()
+        })
+    trend_df = pd.DataFrame(trend_rows)
+    breakdowns_2yr_avg = trend_df["Breakdowns"].mean()
+    spend_2yr_avg = trend_df["Spend"].mean()
+
+    breakdowns_count = len(this_month_breakdowns)
+    spend_this_month = this_month_breakdowns["Amount (AUD)"].sum()
+
+    count_delta = ((breakdowns_count - breakdowns_2yr_avg) / breakdowns_2yr_avg * 100) if breakdowns_2yr_avg else 0
+    spend_delta = ((spend_this_month - spend_2yr_avg) / spend_2yr_avg * 100) if spend_2yr_avg else 0
+
+    st.write("")
+
+    # ---------- metrics row ----------
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Breakdowns this month", breakdowns_count, delta=f"{count_delta:+.0f}% vs 2yr avg")
+    col2.metric("2yr avg breakdowns", f"{breakdowns_2yr_avg:.1f}")
+    col3.metric("Spend this month", f"${spend_this_month:,.0f}", delta=f"{spend_delta:+.0f}% vs 2yr avg")
+    col4.metric("2yr avg spend", f"${spend_2yr_avg:,.0f}")
+
+    st.write("")
+
+    # ---------- data-driven insight ----------
+    repeat_counts = this_month_breakdowns["Asset Serial Number"].value_counts()
+    repeat_offenders = repeat_counts[repeat_counts > 1]
+
+    young_repeat_serials = []
+    young_repeat_labels = []
+    older_repeat_serials = []
+    older_repeat_labels = []
+    for serial, count in repeat_offenders.items():
+        install_date = serial_to_install_date.get(serial)
+        age_years = (AS_OF_DATE - install_date).days / 365.25 if pd.notna(install_date) else None
+        label = f"{serial} ({count}x)"
+        if age_years is not None and age_years <= 3:
+            young_repeat_serials.append(serial)
+            young_repeat_labels.append(label)
+        else:
+            older_repeat_serials.append(serial)
+            older_repeat_labels.append(label)
+
+    if young_repeat_serials:
+        young_spend = this_month_breakdowns[this_month_breakdowns["Asset Serial Number"].isin(young_repeat_serials)]["Amount (AUD)"].sum()
+        young_result = f"{', '.join(young_repeat_labels)} (${young_spend:,.0f}) - recommend a warranty claim review."
+    else:
+        young_result = "None this month."
+
+    if older_repeat_serials:
+        older_spend = this_month_breakdowns[this_month_breakdowns["Asset Serial Number"].isin(older_repeat_serials)]["Amount (AUD)"].sum()
+        older_result = f"{', '.join(older_repeat_labels)} (${older_spend:,.0f}) - likely a fault-finding process over multiple attendances or wear-part replacement."
+    else:
+        older_result = "None this month."
+
+    avg_repair_cost = type_breakdown_df["Amount (AUD)"].mean()
+    high_cost_repairs = this_month_breakdowns[
+        (this_month_breakdowns["Amount (AUD)"] > avg_repair_cost * 2) &
+        (~this_month_breakdowns["Asset Serial Number"].isin(repeat_offenders.index))
+    ]
+    if len(high_cost_repairs) > 0:
+        high_cost_list = ", ".join(
+            f"{row['Asset Serial Number']} (${row['Amount (AUD)']:,.0f})"
+            for index, row in high_cost_repairs.iterrows()
+        )
+        high_cost_result = f"{high_cost_list} - likely a major part replacement rather than a routine repair."
+    else:
+        high_cost_result = "None this month."
+
+    st.markdown(
+        f"- **Repeat breakdowns, 3yrs old or less (warranty candidates):** {young_result}\n"
+        f"- **Repeat breakdowns, over 3yrs old (fault-finding/wear parts):** {older_result}\n"
+        f"- **Repairs costing over 2x the average (${avg_repair_cost:,.0f}):** {high_cost_result}"
+    )
+
+    st.write("")
+
+    colA, colSpacer, colB = st.columns([4, 1, 5])
+
+    # ---------- breakdowns by state bar chart ----------
+    with colA:
+        state_fig = px.bar(
+            this_month_breakdowns.groupby("State").size().reset_index(name="Breakdowns"),
+            x="State", y="Breakdowns", title="Breakdowns by State (This Month)"
+        )
+        state_fig.update_yaxes(dtick=1)
+        state_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":0}, xaxis_title=None, yaxis_title=None)
+        st.plotly_chart(state_fig, use_container_width=True)
+
+    # ---------- spend trend line chart ----------
+    with colB:
+        trend_fig = px.line(trend_df, x="YearMonth", y="Spend", title="Breakdown Spend - Last 2 Years")
+        trend_fig.update_yaxes(tickprefix="$")
+        trend_fig.update_xaxes(tickangle=-45)
+        trend_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
+        st.plotly_chart(trend_fig, use_container_width=True)
+
+    # ---------- map of breakdown locations ----------
+    map_fig = px.scatter_geo(
+        this_month_breakdowns, lat="lat", lon="lon",
+        hover_name="Store Reference",
+        hover_data={"Asset Serial Number": True, "Amount (AUD)": True, "lat": False, "lon": False},
+        scope="world",
+    )
+    map_fig.update_traces(marker=dict(size=10, color="red"))
+    map_fig.update_geos(
+        lataxis_range=[-45, -9], lonaxis_range=[108, 156],
+        showland=True, landcolor="rgb(235,235,230)", showcountries=True,
+    )
+    map_fig.update_layout(
+        title=dict(text="This Month's Compactor Breakdowns - Locations", x=0.5, xanchor="center"),
+        margin={"r":40,"t":50,"l":0,"b":0}, height=450,
+    )
+    st.plotly_chart(map_fig, use_container_width=True)
+
+    # ---------- breakdown details dropdown ----------
+    with st.expander(f"View {len(this_month_breakdowns)} compactor breakdown(s) this month"):
+        breakdown_display = this_month_breakdowns[[
+            "Invoice Number", "Invoice Date", "Store Reference", "Store Name",
+            "Asset Serial Number", "Service Description", "Amount (AUD)"
+        ]].sort_values("Invoice Date").copy()
+        breakdown_display["Invoice Date"] = breakdown_display["Invoice Date"].dt.date
+        st.dataframe(breakdown_display)
+
+
+
+
+
+# ============================================================
+# 14. TAB - PREDICTIVE CAPEX
 # ============================================================
 elif section == "Predictive Capex":
 
