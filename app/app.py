@@ -59,14 +59,27 @@ import plotly.express as px
 
 st.set_page_config(layout="wide")
 
-col_img1, col_title, col_img2 = st.columns([1, 3, 1])
-with col_img1:
-    st.image("assets/baler_image.png", width=150)
-with col_title:
-    st.header("National Supply Co - KPI Dashboard")
-    st.subheader("For Baler & Compactor Contract")
-with col_img2:
-    st.image("assets/compactor_image.png", width=285)
+section = st.sidebar.radio("Navigation", [
+    "About Us", "Upload Files", "Safety Compliance", "Pricing Compliance",
+    "Asset Accuracy", "Planned Servicing", "Breakdowns-Balers", "Breakdowns-Compactors",
+    "Predictive Capex"
+])
+
+SECTION_TITLES = {
+    "About Us": ("ℹ️", "About This Dashboard"),
+    "Upload Files": ("📁", "Upload Your Data"),
+    "Safety Compliance": ("🦺", "Safety Compliance"),
+    "Pricing Compliance": ("💲", "Pricing Compliance"),
+    "Asset Accuracy": ("📋", "Asset Register Accuracy"),
+    "Planned Servicing": ("🗓️", "Planned Servicing"),
+    "Breakdowns-Balers": ("⚠️", "Breakdowns - Balers"),
+    "Breakdowns-Compactors": ("⚠️", "Breakdowns - Compactors"),
+    "Predictive Capex": ("📈", "Predictive Capex"),
+}
+
+icon, page_title = SECTION_TITLES[section]
+st.header("National Supply Co - KPI Dashboard")
+st.subheader(f"{icon} {page_title}")
 
 
 
@@ -186,23 +199,9 @@ recency_cutoff = AS_OF_DATE - pd.Timedelta(days=60)
 
 
 # ============================================================
-# 5. SIDEBAR NAVIGATION
-# ============================================================
-section = st.sidebar.radio("Go to", [
-    "About Us", "Upload Files", "Safety Compliance", "Pricing Compliance",
-    "Asset Accuracy", "Planned Servicing", "Breakdowns-Balers", "Breakdowns-Compactors",
-    "Predictive Capex"
-])
-
-
-
-
-
-# ============================================================
 # 6. TAB - ABOUT US
 # ============================================================
 if section == "About Us":
-    st.subheader("About this dashboard")
 
     st.markdown(
         "This dashboard tracks safety, pricing, and servicing compliance, plus asset accuracy, "
@@ -242,8 +241,6 @@ if section == "About Us":
 # ============================================================
 elif section == "Upload Files":
 
-    st.subheader("Upload this month's files")
-
     st.write("Drop in the latest export from each of the four source systems to refresh the dashboard.")
 
     row1_a, row1_b = st.columns(2)
@@ -280,12 +277,18 @@ elif section == "Upload Files":
 # ============================================================
 elif section == "Safety Compliance":
 
-    st.subheader("Safety compliance (Verified)")
+    st.write("")
 
-    st.caption(
-        "Verified logs contractor sign-in and induction before work starts on site.  \n"
-        "Incomplete inductions mean licence and insurance weren't verified, which is a WHS and compliance risk."
-    )
+    st.markdown("Checks that contractors signed in and completed induction before starting work on site.")
+
+    st.write("")
+
+    with st.expander("More Info"):
+        st.markdown(
+            "- Verified logs contractor sign-in and induction before work starts on site\n"
+            "- Incomplete inductions mean licence and insurance weren't verified, which is a WHS and compliance risk"
+        )
+
     st.divider()
 
     target_year_month = AS_OF_DATE.strftime("%Y-%m")
@@ -370,12 +373,10 @@ elif section == "Safety Compliance":
             f"{len(missing_signin_df)} job(s) had no matching sign-in at all - follow up required to confirm who attended site and why they didn't sign in."
         )
 
-    if not insight_lines:
-        signin_insight = "All invoiced jobs this period were fully sign-in compliant."
+    if insight_lines:
+        st.warning("⚠️ " + "  \n".join(insight_lines))
     else:
-        signin_insight = "  \n".join(insight_lines)
-
-    st.caption(signin_insight)
+        st.success("All invoiced jobs this period were fully sign-in compliant.")
 
     st.divider()
 
@@ -462,14 +463,18 @@ elif section == "Safety Compliance":
 # ============================================================
 elif section == "Pricing Compliance":
 
-    st.subheader("Pricing compliance")
+    st.write("")
 
-    st.caption(
-        "The contract has agreed rates for preventative services for each asset type and location tier (Metro/Regional).  \n"
-        "This dashboard reconciles the invoices against the contract rates to ensure compliance, and picks up any manual "
-        "invoicing errors or unauthorised increases.  \n"
-        "This catches over/undercharges early, before they compound across the store network."
-    )
+    st.markdown("Checks invoiced preventative service prices against contracted rates by asset type and location tier.")
+
+    st.write("")
+
+    with st.expander("More Info"):
+        st.markdown(
+            "- The contract has agreed rates for preventative services for each asset type and location tier (Metro/Regional)\n"
+            "- This dashboard reconciles invoices against those rates to catch manual invoicing errors or unauthorised increases\n"
+            "- Catches over/undercharges early, before they compound across the store network"
+        )
 
     st.divider()
 
@@ -511,17 +516,15 @@ elif section == "Pricing Compliance":
 
     # ---------- pricing insight caption ----------
     if len(flagged_df) == 0:
-        insight_caption = "All preventative invoices this period were priced correctly."
+        st.success("All preventative invoices this period were priced correctly.")
     else:
         total_variance = (flagged_df["Amount (AUD)"] - flagged_df["Expected Price"]).sum()
         if total_variance > 0:
-            insight_caption = f"{len(flagged_df)} invoice(s) flagged, resulting in a total overcharge of ${total_variance:,.0f} - Coretex to review with accounts dept."
+            st.warning(f"⚠️ {len(flagged_df)} invoice(s) flagged, resulting in a total overcharge of ${total_variance:,.0f} - Coretex to review with accounts dept.")
         elif total_variance < 0:
-            insight_caption = f"{len(flagged_df)} invoice(s) flagged, resulting in a total undercharge of ${abs(total_variance):,.0f}."
+            st.warning(f"⚠️ {len(flagged_df)} invoice(s) flagged, resulting in a total undercharge of ${abs(total_variance):,.0f}.")
         else:
-            insight_caption = f"{len(flagged_df)} invoice(s) flagged for incorrect pricing, though total charged happened to match total expected overall."
-
-    st.caption(insight_caption)
+            st.warning(f"⚠️ {len(flagged_df)} invoice(s) flagged for incorrect pricing, though total charged happened to match total expected overall.")
 
     if len(flagged_df) > 0:
 
@@ -569,13 +572,20 @@ elif section == "Pricing Compliance":
 # ============================================================
 elif section == "Asset Accuracy":
 
-    st.subheader("Asset register accuracy")
+    st.write("")
 
-    st.caption(
-        "NSC's asset register and Coretex's equipment records should always match, since both track what's actually installed on site.  \n"
-        "This dashboard reconciles the two systems to catch assets that are missing, newly added, or removed from either one.  \n"
-        "This keeps servicing, safety compliance and billing accurate, since they all rely on knowing exactly what's on site."
-    )
+    st.markdown("Reconciles NSC's asset register against Coretex's records to catch what's missing, newly added, or removed.")
+
+    st.write("")
+
+    with st.expander("More Info"):
+        st.markdown(
+            "- NSC's asset register and Coretex's equipment records should always match, since both track what's actually installed on site\n"
+            "- Keeping them aligned matters because servicing, safety compliance and billing all rely on knowing exactly what's on site\n"
+            "- Replacements are new installs matched to a removed asset at the same store\n"
+            "- New Stores are additional units with no matched removal\n"
+            "- Needs Review flags anything that doesn't fit that pattern, including removals with no matching new install"
+        )
 
     st.divider()
 
@@ -667,8 +677,13 @@ elif section == "Asset Accuracy":
         pending_coretex_df[["Store Name", "State", "Asset Type", "Category", "lat", "lon"]]
     ], ignore_index=True)
 
-    # ---------- summary table + map ----------
-    st.metric("Asset register accuracy", f"{asset_match_rate:.1f}%")
+    # ---------- summary metric + flag ----------
+    col_metric, col_flag = st.columns([1, 3])
+    with col_metric:
+        st.metric("Asset register accuracy", f"{asset_match_rate:.1f}%")
+    with col_flag:
+        if len(new_installs_df) > 0 or len(removed_assets_df) > 0:
+            st.warning(f"⚠️ {len(new_installs_df)} new asset(s) need to be added and {len(removed_assets_df)} need to be removed from NSC's register.")
 
     asset_changes = pd.DataFrame({
         "Status": ["Total assets", "New Assets", "Removed Assets", "Needs Review"],
@@ -678,9 +693,51 @@ elif section == "Asset Accuracy":
     col_table, col_map = st.columns([1, 3])
 
     with col_table:
-        st.table(asset_changes)
-        st.caption("New Assets matched to a Removed Asset are like-for-like replacements. Other New Assets are likely a new store or an additional unit added for demand. Needs Review flags anything that doesn't fit that pattern.")
+        replacement_count = len(new_installs_df[new_installs_df["Match Type"] == "Replacement"])
+        new_store_count = len(new_installs_df[new_installs_df["Match Type"] == "New Store"])
+        needs_review_count = len(needs_review_combined) + len(removed_assets_df[removed_assets_df["Match Type"] == "Unmatched removal"])
+        no_change_count = len(coretex_serials) - replacement_count - new_store_count - needs_review_count
 
+        asset_pie_df = pd.DataFrame({
+            "Status": ["No Change", "Replacements", "New Stores", "Needs Review"],
+            "Count": [no_change_count, replacement_count, new_store_count, needs_review_count]
+        })
+
+        pie_fig = px.pie(
+            asset_pie_df, names="Status", values="Count",
+            title=f"Asset Register<br>{len(coretex_serials)} Total Assets",
+            color="Status",
+            hole=0.5,
+            color_discrete_map={
+                "No Change": "#9e9e9e",
+                "Replacements": "green",
+                "New Stores": "#f2c744",
+                "Needs Review": "red"
+            }
+        )
+        pie_fig.update_traces(domain=dict(x=[0, 0.6], y=[0, 1]), textinfo="none")
+
+        total = asset_pie_df["Count"].sum()
+        label_colors = {"No Change": "#9e9e9e", "Replacements": "green", "New Stores": "#f2c744", "Needs Review": "red"}
+        y_positions = [0.95, 0.65, 0.35, 0.05]
+        for (idx, row), y in zip(asset_pie_df.iterrows(), y_positions):
+            pct = row["Count"] / total * 100
+            pie_fig.add_annotation(
+                x=0.75, y=y, xref="paper", yref="paper",
+                text=f"<b>{row['Status']}</b><br>{row['Count']} ({pct:.0f}%)",
+                showarrow=False, align="left", xanchor="left",
+                font=dict(color=label_colors[row["Status"]], size=13)
+            )
+
+        pie_fig.update_layout(
+            margin={"l": 0, "r": 0, "t": 60, "b": 20},
+            height=320,
+            showlegend=False
+        )
+        st.plotly_chart(pie_fig, use_container_width=True)
+        st.caption("Replacements are new installs matched to a removed asset at the same store. New Stores are additional units with no matched removal. Needs Review flags anything that doesn't fit that pattern, including removals with no matching new install.")
+
+    # ---------- map ----------
     with col_map:
         fig = px.scatter_geo(
             map_df, lat="lat", lon="lon",
@@ -702,8 +759,9 @@ elif section == "Asset Accuracy":
         )
         fig.update_layout(
             title=dict(text="All Unit Locations", x=0.5, xanchor="center"),
-            margin={"r":40,"t":50,"l":0,"b":0}, height=450,
-            legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
+            margin={"r":40,"t":50,"l":0,"b":60}, height=450,
+            legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5),
+            legend_title_text=""
         )
         fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig, width="stretch")
@@ -742,13 +800,18 @@ elif section == "Asset Accuracy":
 # ============================================================
 elif section == "Planned Servicing":
 
-    st.subheader("Planned servicing")
+    st.write("")
 
-    st.caption(
-        "Each asset has a scheduled preventative service month based on its install date.  \n"
-        "This dashboard checks whether that servicing was actually completed on time, and tracks the trend over the last 2 years.  \n"
-        "This flags outstanding services early, before a missed service turns into an unplanned breakdown."
-    )
+    st.markdown("Checks whether scheduled preventative servicing is happening on time across the store network.")
+
+    st.write("")
+
+    with st.expander("More Info"):
+        st.markdown(
+            "- Each asset has a scheduled preventative service month based on its install date\n"
+            "- This dashboard checks whether that servicing was actually completed on time, and tracks the trend over the last 2 years\n"
+            "- Flags outstanding services early, before a missed service turns into an unplanned breakdown"
+        )
 
     st.divider()
 
@@ -810,11 +873,11 @@ elif section == "Planned Servicing":
 
     rate_diff = servicing_on_time_rate - servicing_2yr_avg_rate
     if rate_diff < -2:
-        trend_caption = "Below average result - recommend investigating further why the outstanding is higher than standard."
+        st.warning("⚠️ Below average result - recommend investigating further why the outstanding is higher than standard.")
     elif rate_diff > 2:
-        trend_caption = "Above average result."
+        st.success("Above average result.")
     else:
-        trend_caption = "In line with the 2-year average."
+        st.info("In line with the 2-year average.")
 
     st.write("")
 
@@ -825,7 +888,6 @@ elif section == "Planned Servicing":
         trend_fig.update_xaxes(tickangle=-45)
         trend_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
         st.plotly_chart(trend_fig, use_container_width=True)
-        st.caption(trend_caption)
 
     # ---------- outstanding by state bar chart ----------
     with colB:
@@ -896,14 +958,21 @@ elif section == "Planned Servicing":
 # 12. TAB - BREAKDOWNS-BALERS
 # ============================================================
 elif section == "Breakdowns-Balers":
-    st.subheader("Breakdowns - Balers")
 
-    st.caption(
-        "Tracks unplanned breakdown repairs for balers - frequency, cost and location this month versus the 2-year average.  \n"
-        "It's important to monitor because breakdowns are unplanned and unbudgeted, unlike preventative servicing, and can signal "
-        "a specific unit needing escalation (repeat failures, a major fault) rather than routine wear and tear.  \n"
-        "Tracking this also helps separate one-off repair costs from patterns worth investigating further with Facility Managers."
-    )
+    st.write("")
+
+    st.markdown("Tracks unplanned baler breakdown repairs - frequency, cost and location this month versus the 2-year average.")
+
+    st.write("")
+
+    with st.expander("More Info"):
+        st.markdown(
+            "- Breakdowns are unplanned and unbudgeted, unlike preventative servicing\n"
+            "- Can signal a specific unit needing escalation (repeat failures, a major fault) rather than routine wear and tear\n"
+            "- Helps separate one-off repair costs from patterns worth investigating further with Facility Managers"
+        )
+
+    st.divider()
 
     # ---------- data prep ----------
     serial_to_type = dict(zip(nsc_df["Serial Number"], nsc_df["Asset Type"]))
@@ -949,13 +1018,11 @@ elif section == "Breakdowns-Balers":
     count_delta = ((breakdowns_count - breakdowns_2yr_avg) / breakdowns_2yr_avg * 100) if breakdowns_2yr_avg else 0
     spend_delta = ((spend_this_month - spend_2yr_avg) / spend_2yr_avg * 100) if spend_2yr_avg else 0
 
-    st.divider()
-
     # ---------- metrics row ----------
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Breakdowns this month", breakdowns_count, delta=f"{count_delta:+.0f}% vs 2yr avg")
+    col1.metric("Breakdowns this month", breakdowns_count, delta=f"{count_delta:+.0f}% vs 2yr avg", delta_color="off")
     col2.metric("2yr avg breakdowns", f"{breakdowns_2yr_avg:.1f}")
-    col3.metric("Spend this month", f"${spend_this_month:,.0f}", delta=f"{spend_delta:+.0f}% vs 2yr avg")
+    col3.metric("Spend this month", f"${spend_this_month:,.0f}", delta=f"{spend_delta:+.0f}% vs 2yr avg", delta_color="off")
     col4.metric("2yr avg spend", f"${spend_2yr_avg:,.0f}")
 
     st.divider()
@@ -984,15 +1051,15 @@ elif section == "Breakdowns-Balers":
 
     if young_repeat_serials:
         young_spend = this_month_breakdowns[this_month_breakdowns["Asset Serial Number"].isin(young_repeat_serials)]["Amount (AUD)"].sum()
-        young_result = f"<span style='color:red'>{', '.join(young_repeat_labels)} (${young_spend:,.0f})</span>"
+        young_result = f"{', '.join(young_repeat_labels)} (${young_spend:,.0f})"
     else:
-        young_result = "None this month."
+        young_result = None
 
     if older_repeat_serials:
         older_spend = this_month_breakdowns[this_month_breakdowns["Asset Serial Number"].isin(older_repeat_serials)]["Amount (AUD)"].sum()
-        older_result = f"<span style='color:red'>{', '.join(older_repeat_labels)} (${older_spend:,.0f})</span>"
+        older_result = f"{', '.join(older_repeat_labels)} (${older_spend:,.0f})"
     else:
-        older_result = "None this month."
+        older_result = None
 
     avg_repair_cost = type_breakdown_df["Amount (AUD)"].mean()
     high_cost_repairs = this_month_breakdowns[
@@ -1000,20 +1067,25 @@ elif section == "Breakdowns-Balers":
         (~this_month_breakdowns["Asset Serial Number"].isin(repeat_offenders.index))
     ]
     if len(high_cost_repairs) > 0:
-        high_cost_list = ", ".join(
+        high_cost_result = ", ".join(
             f"{row['Asset Serial Number']} - {row['Store Name']} ({row['Asset Type']}, ${row['Amount (AUD)']:,.0f})"
             for index, row in high_cost_repairs.iterrows()
         )
-        high_cost_result = f"<span style='color:red'>{high_cost_list}</span>"
     else:
-        high_cost_result = "None this month."
+        high_cost_result = None
 
-    st.markdown(
-        f"- **Repeat breakdowns, 3yrs old or less (warranty candidates):** {young_result}\n"
-        f"- **Repeat breakdowns, over 3yrs old (fault-finding/wear parts):** {older_result}\n"
-        f"- **Repairs costing over 2x the average (${avg_repair_cost:,.0f}):** {high_cost_result}",
-        unsafe_allow_html=True
-    )
+    insight_lines = []
+    if young_result:
+        insight_lines.append(f"**Repeat breakdowns, 3yrs old or less (warranty candidates):** {young_result}")
+    if older_result:
+        insight_lines.append(f"**Repeat breakdowns, over 3yrs old (fault-finding/wear parts):** {older_result}")
+    if high_cost_result:
+        insight_lines.append(f"**Repairs costing over 2x the average (${avg_repair_cost:,.0f}):** {high_cost_result}")
+
+    if insight_lines:
+        st.warning("⚠️ " + "  \n".join(insight_lines))
+    else:
+        st.success("No repeat breakdowns or high-cost repairs flagged this month.")
 
     st.divider()
 
@@ -1097,14 +1169,21 @@ elif section == "Breakdowns-Balers":
 # 13. TAB - BREAKDOWNS-COMPACTORS
 # ============================================================
 elif section == "Breakdowns-Compactors":
-    st.subheader("Breakdowns - Compactors")
 
-    st.caption(
-        "Tracks unplanned breakdown repairs for compactors - frequency, cost and location this month versus the 2-year average.  \n"
-        "It's important to monitor because breakdowns are unplanned and unbudgeted, unlike preventative servicing, and can signal "
-        "a specific unit needing escalation (repeat failures, a major fault) rather than routine wear and tear.  \n"
-        "Tracking this also helps separate one-off repair costs from patterns worth investigating further with Facility Managers."
-    )
+    st.write("")
+
+    st.markdown("Tracks unplanned compactor breakdown repairs - frequency, cost and location this month versus the 2-year average.")
+
+    st.write("")
+
+    with st.expander("More Info"):
+        st.markdown(
+            "- Breakdowns are unplanned and unbudgeted, unlike preventative servicing\n"
+            "- Can signal a specific unit needing escalation (repeat failures, a major fault) rather than routine wear and tear\n"
+            "- Helps separate one-off repair costs from patterns worth investigating further with Facility Managers"
+        )
+
+    st.divider()
 
     # ---------- data prep ----------
     serial_to_type = dict(zip(nsc_df["Serial Number"], nsc_df["Asset Type"]))
@@ -1150,13 +1229,11 @@ elif section == "Breakdowns-Compactors":
     count_delta = ((breakdowns_count - breakdowns_2yr_avg) / breakdowns_2yr_avg * 100) if breakdowns_2yr_avg else 0
     spend_delta = ((spend_this_month - spend_2yr_avg) / spend_2yr_avg * 100) if spend_2yr_avg else 0
 
-    st.divider()
-
     # ---------- metrics row ----------
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Breakdowns this month", breakdowns_count, delta=f"{count_delta:+.0f}% vs 2yr avg")
+    col1.metric("Breakdowns this month", breakdowns_count, delta=f"{count_delta:+.0f}% vs 2yr avg", delta_color="off")
     col2.metric("2yr avg breakdowns", f"{breakdowns_2yr_avg:.1f}")
-    col3.metric("Spend this month", f"${spend_this_month:,.0f}", delta=f"{spend_delta:+.0f}% vs 2yr avg")
+    col3.metric("Spend this month", f"${spend_this_month:,.0f}", delta=f"{spend_delta:+.0f}% vs 2yr avg", delta_color="off")
     col4.metric("2yr avg spend", f"${spend_2yr_avg:,.0f}")
 
     st.divider()
@@ -1165,6 +1242,9 @@ elif section == "Breakdowns-Compactors":
     repeat_counts = this_month_breakdowns["Asset Serial Number"].value_counts()
     repeat_offenders = repeat_counts[repeat_counts > 1]
 
+    serial_to_store = dict(zip(this_month_breakdowns["Asset Serial Number"], this_month_breakdowns["Store Name"]))
+    serial_to_assettype = dict(zip(this_month_breakdowns["Asset Serial Number"], this_month_breakdowns["Asset Type"]))
+
     young_repeat_serials = []
     young_repeat_labels = []
     older_repeat_serials = []
@@ -1172,7 +1252,7 @@ elif section == "Breakdowns-Compactors":
     for serial, count in repeat_offenders.items():
         install_date = serial_to_install_date.get(serial)
         age_years = (AS_OF_DATE - install_date).days / 365.25 if pd.notna(install_date) else None
-        label = f"{serial} ({count}x)"
+        label = f"{serial} - {serial_to_store.get(serial)} ({serial_to_assettype.get(serial)}, {count}x)"
         if age_years is not None and age_years <= 3:
             young_repeat_serials.append(serial)
             young_repeat_labels.append(label)
@@ -1182,15 +1262,15 @@ elif section == "Breakdowns-Compactors":
 
     if young_repeat_serials:
         young_spend = this_month_breakdowns[this_month_breakdowns["Asset Serial Number"].isin(young_repeat_serials)]["Amount (AUD)"].sum()
-        young_result = f"{', '.join(young_repeat_labels)} (${young_spend:,.0f}) - recommend a warranty claim review."
+        young_result = f"{', '.join(young_repeat_labels)} (${young_spend:,.0f})"
     else:
-        young_result = "None this month."
+        young_result = None
 
     if older_repeat_serials:
         older_spend = this_month_breakdowns[this_month_breakdowns["Asset Serial Number"].isin(older_repeat_serials)]["Amount (AUD)"].sum()
-        older_result = f"{', '.join(older_repeat_labels)} (${older_spend:,.0f}) - likely a fault-finding process over multiple attendances or wear-part replacement."
+        older_result = f"{', '.join(older_repeat_labels)} (${older_spend:,.0f})"
     else:
-        older_result = "None this month."
+        older_result = None
 
     avg_repair_cost = type_breakdown_df["Amount (AUD)"].mean()
     high_cost_repairs = this_month_breakdowns[
@@ -1198,19 +1278,25 @@ elif section == "Breakdowns-Compactors":
         (~this_month_breakdowns["Asset Serial Number"].isin(repeat_offenders.index))
     ]
     if len(high_cost_repairs) > 0:
-        high_cost_list = ", ".join(
-            f"{row['Asset Serial Number']} (${row['Amount (AUD)']:,.0f})"
+        high_cost_result = ", ".join(
+            f"{row['Asset Serial Number']} - {row['Store Name']} ({row['Asset Type']}, ${row['Amount (AUD)']:,.0f})"
             for index, row in high_cost_repairs.iterrows()
         )
-        high_cost_result = f"{high_cost_list} - likely a major part replacement rather than a routine repair."
     else:
-        high_cost_result = "None this month."
+        high_cost_result = None
 
-    st.markdown(
-        f"- **Repeat breakdowns, 3yrs old or less (warranty candidates):** {young_result}\n"
-        f"- **Repeat breakdowns, over 3yrs old (fault-finding/wear parts):** {older_result}\n"
-        f"- **Repairs costing over 2x the average (${avg_repair_cost:,.0f}):** {high_cost_result}"
-    )
+    insight_lines = []
+    if young_result:
+        insight_lines.append(f"**Repeat breakdowns, 3yrs old or less (warranty candidates):** {young_result}")
+    if older_result:
+        insight_lines.append(f"**Repeat breakdowns, over 3yrs old (fault-finding/wear parts):** {older_result}")
+    if high_cost_result:
+        insight_lines.append(f"**Repairs costing over 2x the average (${avg_repair_cost:,.0f}):** {high_cost_result}")
+
+    if insight_lines:
+        st.warning("⚠️ " + "  \n".join(insight_lines))
+    else:
+        st.success("No repeat breakdowns or high-cost repairs flagged this month.")
 
     st.divider()
 
@@ -1295,13 +1381,18 @@ elif section == "Breakdowns-Compactors":
 # ============================================================
 elif section == "Predictive Capex":
 
-    st.subheader("Predictive capex - next 12 months")
+    st.write("")
 
-    st.caption(
-        "Ageing or high-maintenance assets are a known cost risk, so it helps to plan for replacement ahead of time rather than reacting to a major breakdown.  \n"
-        "This dashboard forecasts capex needs for the next 12 months - proactive planned replacements and reactive unplanned breakdown spend.  \n"
-        "Units are flagged as high risk based on their age, location and breakdown history."
-    )
+    st.markdown("Forecasts capex needs for the next 12 months, flagging units likely to need replacement.")
+
+    st.write("")
+
+    with st.expander("More Info"):
+        st.markdown(
+            "- Ageing or high-maintenance assets are a known cost risk, so it helps to plan replacement ahead of a major breakdown\n"
+            "- Forecasts both proactive planned replacements and reactive unplanned breakdown spend for the next 12 months\n"
+            "- Units are flagged as high risk based on their age, location and breakdown history"
+        )
 
     st.divider()
 
@@ -1398,7 +1489,7 @@ elif section == "Predictive Capex":
 
         **Proactive (planned)** - flags assets for replacement when **both**:
         - Age is near/past typical design life
-        - Breakdown spend is over 50% of a new unit's cost
+        - Total lifetime breakdown spend to date has reached 50%+ of what a new unit would cost
 
         Also catches young "lemons" - flagged separately, since these usually need a
         warranty conversation, not a routine replacement.
