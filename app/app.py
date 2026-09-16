@@ -63,7 +63,7 @@ col_img1, col_title, col_img2 = st.columns([1, 3, 1])
 with col_img1:
     st.image("assets/baler_image.png", width=150)
 with col_title:
-    st.title("National Supply Co - KPI Dashboard")
+    st.header("National Supply Co - KPI Dashboard")
     st.subheader("For Baler & Compactor Contract")
 with col_img2:
     st.image("assets/compactor_image.png", width=285)
@@ -106,6 +106,19 @@ def extract_coords(row):
 
 UPLOAD_KEYS = ["asset_file", "coretex_file", "aroflo_file", "verified_file", "lifetime_file"]
 using_uploaded_files = all(st.session_state.get(key) is not None for key in UPLOAD_KEYS)
+
+STATE_COLORS = {
+    "NSW": "#4C78A8",
+    "VIC": "#F58518",
+    "QLD": "#E45756",
+    "WA":  "#72B7B2",
+    "SA":  "#54A24B",
+    "TAS": "#EECA3B",
+    "ACT": "#B279A2",
+    "NT":  "#FF9DA6",
+}
+
+STATE_ORDER = ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"]
 
 if using_uploaded_files:
     for key in UPLOAD_KEYS:
@@ -342,7 +355,7 @@ elif section == "Safety Compliance":
     st.write("")
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Fully sign-in compliant", f"{signed_in_count} of {len(this_month_invoices)} invoiced jobs")
+    col1.metric("Invoiced jobs fully sign-in compliant", f"{signed_in_count} of {len(this_month_invoices)}")
     col2.metric("This month compliance", f"{compliance_rate_this_month:.1f}%", delta=f"{compliance_rate_this_month - compliance_2yr_avg:.1f}% vs 2yr avg")
     col3.metric("2yr average", f"{compliance_2yr_avg:.1f}%")
 
@@ -386,7 +399,7 @@ elif section == "Safety Compliance":
     # ---------- map ----------
     signin_map_fig = px.scatter_geo(
         this_month_invoices, lat="lat", lon="lon",
-        hover_name="Store Reference",
+        hover_name="Store Name",
         hover_data={"Asset Serial Number": True, "Job Type": True, "lat": False, "lon": False},
         color="Category",
         color_discrete_map={"Compliant": "green", "Not Compliant": "red"},
@@ -951,6 +964,9 @@ elif section == "Breakdowns-Balers":
     repeat_counts = this_month_breakdowns["Asset Serial Number"].value_counts()
     repeat_offenders = repeat_counts[repeat_counts > 1]
 
+    serial_to_store = dict(zip(this_month_breakdowns["Asset Serial Number"], this_month_breakdowns["Store Name"]))
+    serial_to_assettype = dict(zip(this_month_breakdowns["Asset Serial Number"], this_month_breakdowns["Asset Type"]))
+
     young_repeat_serials = []
     young_repeat_labels = []
     older_repeat_serials = []
@@ -958,7 +974,7 @@ elif section == "Breakdowns-Balers":
     for serial, count in repeat_offenders.items():
         install_date = serial_to_install_date.get(serial)
         age_years = (AS_OF_DATE - install_date).days / 365.25 if pd.notna(install_date) else None
-        label = f"{serial} ({count}x)"
+        label = f"{serial} - {serial_to_store.get(serial)} ({serial_to_assettype.get(serial)}, {count}x)"
         if age_years is not None and age_years <= 3:
             young_repeat_serials.append(serial)
             young_repeat_labels.append(label)
@@ -968,13 +984,13 @@ elif section == "Breakdowns-Balers":
 
     if young_repeat_serials:
         young_spend = this_month_breakdowns[this_month_breakdowns["Asset Serial Number"].isin(young_repeat_serials)]["Amount (AUD)"].sum()
-        young_result = f"{', '.join(young_repeat_labels)} (${young_spend:,.0f}) - recommend a warranty claim review."
+        young_result = f"<span style='color:red'>{', '.join(young_repeat_labels)} (${young_spend:,.0f})</span>"
     else:
         young_result = "None this month."
 
     if older_repeat_serials:
         older_spend = this_month_breakdowns[this_month_breakdowns["Asset Serial Number"].isin(older_repeat_serials)]["Amount (AUD)"].sum()
-        older_result = f"{', '.join(older_repeat_labels)} (${older_spend:,.0f}) - likely a fault-finding process over multiple attendances or wear-part replacement."
+        older_result = f"<span style='color:red'>{', '.join(older_repeat_labels)} (${older_spend:,.0f})</span>"
     else:
         older_result = "None this month."
 
@@ -985,17 +1001,18 @@ elif section == "Breakdowns-Balers":
     ]
     if len(high_cost_repairs) > 0:
         high_cost_list = ", ".join(
-            f"{row['Asset Serial Number']} (${row['Amount (AUD)']:,.0f})"
+            f"{row['Asset Serial Number']} - {row['Store Name']} ({row['Asset Type']}, ${row['Amount (AUD)']:,.0f})"
             for index, row in high_cost_repairs.iterrows()
         )
-        high_cost_result = f"{high_cost_list} - likely a major part replacement rather than a routine repair."
+        high_cost_result = f"<span style='color:red'>{high_cost_list}</span>"
     else:
         high_cost_result = "None this month."
 
     st.markdown(
         f"- **Repeat breakdowns, 3yrs old or less (warranty candidates):** {young_result}\n"
         f"- **Repeat breakdowns, over 3yrs old (fault-finding/wear parts):** {older_result}\n"
-        f"- **Repairs costing over 2x the average (${avg_repair_cost:,.0f}):** {high_cost_result}"
+        f"- **Repairs costing over 2x the average (${avg_repair_cost:,.0f}):** {high_cost_result}",
+        unsafe_allow_html=True
     )
 
     st.divider()
@@ -1009,23 +1026,46 @@ elif section == "Breakdowns-Balers":
             x="State", y="Breakdowns", title="Breakdowns by State (This Month)"
         )
         state_fig.update_yaxes(dtick=1)
-        state_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":0}, xaxis_title=None, yaxis_title=None)
+        state_fig.update_layout(height=300, margin={"l":0,"r":0,"t":40,"b":0}, xaxis_title=None, yaxis_title=None)
         st.plotly_chart(state_fig, use_container_width=True)
 
-    # ---------- spend trend line chart ----------
+# ---------- spend by state per month stacked bar ----------
     with colB:
-        trend_fig = px.line(trend_df, x="YearMonth", y="Spend", title="Breakdown Spend - Last 2 Years")
-        trend_fig.update_yaxes(tickprefix="$")
-        trend_fig.update_xaxes(tickangle=-45)
-        trend_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
-        st.plotly_chart(trend_fig, use_container_width=True)
+        heatmap_df = type_breakdown_df.copy()
+        heatmap_df["YearMonth"] = heatmap_df["Invoice Date"].dt.strftime("%Y-%m")
+        heatmap_df = heatmap_df[heatmap_df["YearMonth"].isin([str(period) for period in period_range])]
+
+        state_month_df = heatmap_df.groupby(["YearMonth", "State"])["Amount (AUD)"].sum().reset_index()
+        state_month_df = state_month_df.sort_values("YearMonth")
+
+        state_order = [s for s in STATE_ORDER if s in state_month_df["State"].unique()]
+
+        stacked_fig = px.bar(
+            state_month_df, x="YearMonth", y="Amount (AUD)", color="State",
+            category_orders={"State": state_order},
+            color_discrete_map=STATE_COLORS,
+            title="Breakdown Spend by State - Last 2 Years"
+        )
+
+        stacked_fig.update_yaxes(tickprefix="$")
+        stacked_fig.update_xaxes(tickangle=-45)
+        stacked_fig.update_layout(
+            height=300,
+            margin={"l": 0, "r": 0, "t": 40, "b": 90},
+            xaxis_title=None, yaxis_title=None,
+            legend=dict(
+                orientation="h", traceorder="normal",
+                yanchor="top", y=-0.45, xanchor="center", x=0.5
+            )
+        )
+        st.plotly_chart(stacked_fig, use_container_width=True)
 
     st.divider()
 
     # ---------- map of breakdown locations ----------
     map_fig = px.scatter_geo(
         this_month_breakdowns, lat="lat", lon="lon",
-        hover_name="Store Reference",
+        hover_name="Store Name",
         hover_data={"Asset Serial Number": True, "Amount (AUD)": True, "lat": False, "lon": False},
         scope="world",
     )
@@ -1183,23 +1223,46 @@ elif section == "Breakdowns-Compactors":
             x="State", y="Breakdowns", title="Breakdowns by State (This Month)"
         )
         state_fig.update_yaxes(dtick=1)
-        state_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":0}, xaxis_title=None, yaxis_title=None)
+        state_fig.update_layout(height=300, margin={"l":0,"r":0,"t":40,"b":0}, xaxis_title=None, yaxis_title=None)
         st.plotly_chart(state_fig, use_container_width=True)
 
-    # ---------- spend trend line chart ----------
+# ---------- spend by state per month stacked bar ----------
     with colB:
-        trend_fig = px.line(trend_df, x="YearMonth", y="Spend", title="Breakdown Spend - Last 2 Years")
-        trend_fig.update_yaxes(tickprefix="$")
-        trend_fig.update_xaxes(tickangle=-45)
-        trend_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
-        st.plotly_chart(trend_fig, use_container_width=True)
+        heatmap_df = type_breakdown_df.copy()
+        heatmap_df["YearMonth"] = heatmap_df["Invoice Date"].dt.strftime("%Y-%m")
+        heatmap_df = heatmap_df[heatmap_df["YearMonth"].isin([str(period) for period in period_range])]
+
+        state_month_df = heatmap_df.groupby(["YearMonth", "State"])["Amount (AUD)"].sum().reset_index()
+        state_month_df = state_month_df.sort_values("YearMonth")
+
+        state_order = [s for s in STATE_ORDER if s in state_month_df["State"].unique()]
+
+        stacked_fig = px.bar(
+            state_month_df, x="YearMonth", y="Amount (AUD)", color="State",
+            category_orders={"State": state_order},
+            color_discrete_map=STATE_COLORS,
+            title="Breakdown Spend by State - Last 2 Years"
+        )
+
+        stacked_fig.update_yaxes(tickprefix="$")
+        stacked_fig.update_xaxes(tickangle=-45)
+        stacked_fig.update_layout(
+            height=300,
+            margin={"l": 0, "r": 0, "t": 40, "b": 90},
+            xaxis_title=None, yaxis_title=None,
+            legend=dict(
+                orientation="h", traceorder="normal",
+                yanchor="top", y=-0.45, xanchor="center", x=0.5
+            )
+        )
+        st.plotly_chart(stacked_fig, use_container_width=True)
 
     st.divider()
 
     # ---------- map of breakdown locations ----------
     map_fig = px.scatter_geo(
         this_month_breakdowns, lat="lat", lon="lon",
-        hover_name="Store Reference",
+        hover_name="Store Name",
         hover_data={"Asset Serial Number": True, "Amount (AUD)": True, "lat": False, "lon": False},
         scope="world",
     )
