@@ -61,7 +61,7 @@ st.set_page_config(layout="wide")
 
 section = st.sidebar.radio("Navigation", [
     "About Us", "Upload Files", "Safety Compliance", "Pricing Compliance",
-    "Asset Accuracy", "Planned Servicing", "Breakdowns-Balers", "Breakdowns-Compactors",
+    "Asset Register Accuracy", "Planned Servicing", "Breakdowns-Balers", "Breakdowns-Compactors",
     "Predictive Capex"
 ])
 
@@ -70,7 +70,7 @@ SECTION_TITLES = {
     "Upload Files": ("📁", "Upload Your Data"),
     "Safety Compliance": ("🦺", "Safety Compliance"),
     "Pricing Compliance": ("💲", "Pricing Compliance"),
-    "Asset Accuracy": ("📋", "Asset Register Accuracy"),
+    "Asset Register Accuracy": ("📋", "Asset Register Accuracy"),
     "Planned Servicing": ("🗓️", "Planned Servicing"),
     "Breakdowns-Balers": ("⚠️", "Breakdowns - Balers"),
     "Breakdowns-Compactors": ("⚠️", "Breakdowns - Compactors"),
@@ -199,24 +199,68 @@ recency_cutoff = AS_OF_DATE - pd.Timedelta(days=60)
 
 
 # ============================================================
+# 5. MAP STYLING
+# ============================================================
+def style_map(fig, dark):
+    if dark:
+        fig.update_geos(
+            landcolor="rgb(40,40,40)", showland=True, showcountries=True,
+            countrycolor="rgb(90,90,90)", bgcolor="rgba(0,0,0,0)",
+        )
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
+    else:
+        fig.update_geos(
+            landcolor="rgb(235,235,230)", showland=True, showcountries=True,
+            countrycolor="rgb(180,180,180)", bgcolor="rgba(0,0,0,0)",
+        )
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="black"))
+    return fig
+
+dark_maps = st.sidebar.toggle("Dark mode maps")
+
+
+
+
+
+# ============================================================
 # 6. TAB - ABOUT US
 # ============================================================
 if section == "About Us":
 
-    st.markdown(
-        "This dashboard tracks safety, pricing, and servicing compliance, plus asset accuracy, "
-        "breakdown costs, and capex forecasting, for balers and compactors across Nationwide Supply Co's store network."
-    )
-    st.markdown(
-        "Built for Coretex to manage each month to review with NSC's Facilities Operations team."
-    )
+    text_col, photo_col = st.columns([3, 2])
 
-    st.write("")
-    st.subheader("What this dashboard covers")
+    with text_col:
+        st.markdown(
+            "This dashboard tracks all the core KPIs below for balers and compactors across Nationwide Supply Co's store network."
+        )
+        st.markdown(
+            "Built for Coretex to manage each month to review with NSC's Facilities Operations team."
+        )
+        st.write("")
+        st.write("")
+        st.write("")
+        st.subheader("Core KPIs")
+
+    with photo_col:
+        with st.container(key="about_photos"):
+            baler_col, compactor_col = st.columns(2)
+            with baler_col:
+                st.image("assets/baler_image.png", caption="Baler", width=200)
+            with compactor_col:
+                st.image("assets/compactor_image.png", caption="Compactor", width=320)
+
+    st.markdown("""
+        <style>
+        .st-key-about_photos {
+            margin-top: -50px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
     coverage_items = [
-{"icon": "🦺", "title": "Safety Compliance", "description": "Verified is NSC's contractor safety system, requiring sign-in and induction for every contractor before they can start work on site."},        {"icon": "💲", "title": "Pricing Compliance", "description": "Checks invoiced preventative service prices against contracted rates by location tier."},
-        {"icon": "📋", "title": "Asset Accuracy", "description": "Checks that assets on site match what's recorded in the asset register."},
+        {"icon": "🦺", "title": "Safety Compliance", "description": "Verified is NSC's contractor safety system, requiring sign-in and induction for every contractor before they can start work on site."},
+        {"icon": "💲", "title": "Pricing Compliance", "description": "Checks invoiced preventative service prices against contracted rates by location tier."},
+        {"icon": "📋", "title": "Asset Register Accuracy", "description": "Checks that assets on site match what's recorded in the asset register."},
         {"icon": "🗓️", "title": "Planned Servicing", "description": "Tracks whether preventative servicing is happening on schedule across the store network."},
         {"icon": "⚠️", "title": "Breakdowns", "description": "Tracks breakdown frequency, cost and location for balers and compactors."},
         {"icon": "📈", "title": "Predictive Capex", "description": "Flags assets likely to need replacement based on cost and age trends."},
@@ -229,9 +273,16 @@ if section == "About Us":
     for index, item in enumerate(coverage_items):
         with card_columns[index]:
             with st.container(border=True):
-                st.markdown(f"### {item['icon']}")
-                st.markdown(f"**{item['title']}**")
+                st.markdown(
+                    f"<div style='display:flex; align-items:center; gap:10px;'>"
+                    f"<span style='font-size:36px; line-height:1;'>{item['icon']}</span>"
+                    f"<span style='font-size:19px; font-weight:700;'>{item['title']}</span>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+                st.write("")
                 st.write(item["description"])
+
 
 
 
@@ -355,12 +406,13 @@ elif section == "Safety Compliance":
     this_month_invoices["lat"] = this_month_invoices["Store Reference"].map(store_to_lat)
     this_month_invoices["lon"] = this_month_invoices["Store Reference"].map(store_to_lon)
 
-    st.write("")
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Invoiced jobs fully sign-in compliant", f"{signed_in_count} of {len(this_month_invoices)}")
     col2.metric("This month compliance", f"{compliance_rate_this_month:.1f}%", delta=f"{compliance_rate_this_month - compliance_2yr_avg:.1f}% vs 2yr avg")
     col3.metric("2yr average", f"{compliance_2yr_avg:.1f}%")
+
+    st.divider()
 
     insight_lines = []
     if len(incomplete_induction_df) > 0:
@@ -378,46 +430,6 @@ elif section == "Safety Compliance":
     else:
         st.success("All invoiced jobs this period were fully sign-in compliant.")
 
-    st.divider()
-
-    trend_data = compliance_trend_df.dropna(subset=["Compliance %"])
-    trend_fig = px.line(trend_data, x="YearMonth", y="Compliance %", title="Sign-In Compliance - Last 2 Years")
-    trend_fig.update_yaxes(range=[0, 100], dtick=20, ticksuffix="%")
-    trend_fig.update_xaxes(tickangle=-45)
-    trend_fig.update_layout(height=300, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
-    x_min = trend_data["YearMonth"].min()
-    x_max = trend_data["YearMonth"].max()
-    y_min = trend_data["Compliance %"].min()
-    y_max = trend_data["Compliance %"].max()
-    trend_fig.add_scatter(
-        x=[x_min, x_max], y=[y_min, y_max],
-        mode="lines", name="Overall Trend", line=dict(dash="dot", color="grey")
-    )
-    st.plotly_chart(trend_fig, use_container_width=True)
-
-    st.divider()
-
-    # ---------- map ----------
-    signin_map_fig = px.scatter_geo(
-        this_month_invoices, lat="lat", lon="lon",
-        hover_name="Store Name",
-        hover_data={"Asset Serial Number": True, "Job Type": True, "lat": False, "lon": False},
-        color="Category",
-        color_discrete_map={"Compliant": "green", "Not Compliant": "red"},
-        scope="world",
-    )
-    signin_map_fig.update_traces(marker=dict(size=10))
-    signin_map_fig.update_geos(
-        lataxis_range=[-45, -9], lonaxis_range=[108, 156],
-        showland=True, landcolor="rgb(235,235,230)", showcountries=True,
-    )
-    signin_map_fig.update_layout(
-        title=dict(text="This Month's Invoiced Jobs - Sign-In Compliance", x=0.5, xanchor="center"),
-        margin={"r":40,"t":50,"l":0,"b":0}, height=450,
-        legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
-    )
-    st.plotly_chart(signin_map_fig, use_container_width=True)
-
     # ---------- missing sign-ins dropdown ----------
     if len(missing_signin_df) > 0:
         missing_signin_df["Store Name"] = missing_signin_df["Store Reference"].map(store_to_name)
@@ -430,6 +442,7 @@ elif section == "Safety Compliance":
             st.dataframe(missing_display)
     else:
         st.success("All invoiced jobs this period have a matching sign-in record.")
+
 
     # ---------- incomplete inductions dropdown ----------
     if len(incomplete_induction_df) > 0:
@@ -453,6 +466,54 @@ elif section == "Safety Compliance":
             st.dataframe(incomplete_display)
     else:
         st.success("No signed-in jobs had incomplete inductions this period.")
+
+    st.write("")
+    st.write("")
+    st.write("")
+
+    trend_data = compliance_trend_df.dropna(subset=["Compliance %"])
+    trend_fig = px.line(trend_data, x="YearMonth", y="Compliance %", title="Sign-In Compliance - Last 2 Years")
+    trend_fig.update_yaxes(range=[0, 100], dtick=20, ticksuffix="%")
+    trend_fig.update_xaxes(tickangle=-45)
+    trend_fig.update_layout(height=300, margin={"l":0,"r":0,"t":40,"b":40}, xaxis_title=None, yaxis_title=None)
+    x_min = trend_data["YearMonth"].min()
+    x_max = trend_data["YearMonth"].max()
+    y_min = trend_data["Compliance %"].min()
+    y_max = trend_data["Compliance %"].max()
+    trend_fig.add_scatter(
+        x=[x_min, x_max], y=[y_min, y_max],
+        mode="lines", name="Overall Trend", line=dict(dash="dot", color="grey")
+    )
+    st.plotly_chart(trend_fig, use_container_width=True)
+
+    st.write("")
+    st.write("")
+    st.write("")
+
+    st.divider()
+
+    # ---------- map ----------
+    signin_map_fig = px.scatter_geo(
+        this_month_invoices, lat="lat", lon="lon",
+        hover_name="Store Name",
+        hover_data={"Asset Serial Number": True, "Job Type": True, "lat": False, "lon": False},
+        color="Category",
+        color_discrete_map={"Compliant": "green", "Not Compliant": "red"},
+        scope="world",
+    )
+    signin_map_fig.update_traces(marker=dict(size=10))
+    signin_map_fig.update_geos(
+        lataxis_range=[-45, -9], lonaxis_range=[108, 156],
+        showland=True, landcolor="rgb(235,235,230)", showcountries=True,
+    )
+    signin_map_fig.update_layout(
+        title=dict(text="This Month's Invoiced Jobs - Sign-In Compliance", x=0.5, xanchor="center"),
+        margin={"r":40,"t":50,"l":0,"b":0}, height=450,
+        legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
+    )
+    style_map(signin_map_fig, dark_maps)
+    st.plotly_chart(signin_map_fig, use_container_width=True)
+
 
 
 
@@ -505,16 +566,15 @@ elif section == "Pricing Compliance":
 
     compliance_rate = (len(prev_df) - len(flagged_df)) / len(prev_df) * 100
 
-    st.write("")
-
     col1, col2, col3 = st.columns(3)
     col1.metric("Invoices flagged", len(flagged_df))
     col2.metric("Preventative invoices checked", len(prev_df))
     col3.metric("Pricing compliance rate", f"{compliance_rate:.1f}%")
 
     st.write("")
-
+    st.divider()
     # ---------- pricing insight caption ----------
+
     if len(flagged_df) == 0:
         st.success("All preventative invoices this period were priced correctly.")
     else:
@@ -528,6 +588,7 @@ elif section == "Pricing Compliance":
 
     if len(flagged_df) > 0:
 
+
         # ---------- flagged invoices dropdown ----------
         flagged_display = flagged_df[[
             "Invoice Number", "Invoice Date", "Store Reference", "Asset Serial Number",
@@ -536,6 +597,9 @@ elif section == "Pricing Compliance":
 
         with st.expander(f"View {len(flagged_df)} flagged invoice(s)"):
             st.dataframe(flagged_display)
+
+    st.write("")
+    st.write("")
 
     # ---------- pricing scatter across all preventative invoices ----------
     st.write("")
@@ -570,7 +634,7 @@ elif section == "Pricing Compliance":
 # ============================================================
 # 10. TAB - ASSET ACCURACY
 # ============================================================
-elif section == "Asset Accuracy":
+elif section == "Asset Register Accuracy":
 
     st.write("")
 
@@ -586,8 +650,6 @@ elif section == "Asset Accuracy":
             "- New Stores are additional units with no matched removal\n"
             "- Needs Review flags anything that doesn't fit that pattern, including removals with no matching new install"
         )
-
-    st.divider()
 
     # ---------- metric logic ----------
     nsc_serials = set(nsc_df["Serial Number"])
@@ -678,12 +740,41 @@ elif section == "Asset Accuracy":
     ], ignore_index=True)
 
     # ---------- summary metric + flag ----------
-    col_metric, col_flag = st.columns([1, 3])
-    with col_metric:
-        st.metric("Asset register accuracy", f"{asset_match_rate:.1f}%")
-    with col_flag:
-        if len(new_installs_df) > 0 or len(removed_assets_df) > 0:
-            st.warning(f"⚠️ {len(new_installs_df)} new asset(s) need to be added and {len(removed_assets_df)} need to be removed from NSC's register.")
+    st.divider()
+
+    st.metric("Asset register accuracy", f"{asset_match_rate:.1f}%")
+
+    if len(new_installs_df) > 0 or len(removed_assets_df) > 0:
+        st.warning(f"⚠️ {len(new_installs_df)} new asset(s) need to be added and {len(removed_assets_df)} need to be removed from NSC's register.")
+
+    # ---------- New/Removed/Needs Review dropdowns ----------
+    # if len(new_installs_df) > 0:
+        with st.expander(f"View {len(new_installs_df)} New Asset(s)"):
+            new_display = new_installs_df[["Serial Number", "Match Type", "Matched Removed Serial", "Equipment Type", "Store Reference", "Suburb", "State", "Installation Date"]].rename(
+                columns={"Equipment Type": "Asset Type", "Store Reference": "Store Code", "Matched Removed Serial": "Matched Serial", "Installation Date": "Date"}
+            )
+            st.dataframe(new_display)
+    else:
+        st.success("No new assets this month.")
+
+    if len(removed_assets_df) > 0:
+        with st.expander(f"View {len(removed_assets_df)} Removed Asset(s)"):
+            removed_display = removed_assets_df[["Serial Number", "Match Type", "Matched New Serial", "Asset Type", "Store #", "Suburb", "State", "Status Change Date"]].rename(
+                columns={"Store #": "Store Code", "Matched New Serial": "Matched Serial", "Status Change Date": "Date"}
+            )
+            st.dataframe(removed_display)
+    else:
+        st.info("No removed assets this month.")
+
+    if len(needs_review_combined) > 0:
+        with st.expander(f"⚠️ View {len(needs_review_combined)} unit(s) needing review"):
+            st.dataframe(needs_review_combined)
+
+    st.divider()
+
+    st.write("")
+    st.write("")
+    st.write("")
 
     asset_changes = pd.DataFrame({
         "Status": ["Total assets", "New Assets", "Removed Assets", "Needs Review"],
@@ -764,32 +855,9 @@ elif section == "Asset Accuracy":
             legend_title_text=""
         )
         fig.update_traces(marker=dict(size=10))
+        style_map(fig, dark_maps)
         st.plotly_chart(fig, width="stretch")
 
-    # ---------- New/Removed/Needs Review dropdowns ----------
-    if len(new_installs_df) > 0:
-        with st.expander(f"View {len(new_installs_df)} New Asset(s)"):
-            new_display = new_installs_df[["Serial Number", "Match Type", "Matched Removed Serial", "Equipment Type", "Store Reference", "Suburb", "State", "Installation Date"]].rename(
-                columns={"Equipment Type": "Asset Type", "Store Reference": "Store Code", "Matched Removed Serial": "Matched Serial", "Installation Date": "Date"}
-            )
-            st.dataframe(new_display)
-    else:
-        st.success("No new assets this month.")
-
-    if len(removed_assets_df) > 0:
-        with st.expander(f"View {len(removed_assets_df)} Removed Asset(s)"):
-            removed_display = removed_assets_df[["Serial Number", "Match Type", "Matched New Serial", "Asset Type", "Store #", "Suburb", "State", "Status Change Date"]].rename(
-                columns={"Store #": "Store Code", "Matched New Serial": "Matched Serial", "Status Change Date": "Date"}
-            )
-            st.dataframe(removed_display)
-    else:
-        st.info("No removed assets this month.")
-
-    if len(needs_review_combined) > 0:
-        with st.expander(f"⚠️ View {len(needs_review_combined)} unit(s) needing review"):
-            st.dataframe(needs_review_combined)
-    else:
-        st.info("Nothing flagged for review this month.")
 
 
 
@@ -867,9 +935,7 @@ elif section == "Planned Servicing":
     col3.metric("Completed", f"{len(completed_stores)} stores")
     col4.metric("Outstanding", f"{len(outstanding_stores)} stores")
 
-    st.write("")
-
-    colA, colSpacer, colB = st.columns([4, 1, 5])
+    st.divider()
 
     rate_diff = servicing_on_time_rate - servicing_2yr_avg_rate
     if rate_diff < -2:
@@ -879,7 +945,38 @@ elif section == "Planned Servicing":
     else:
         st.info("In line with the 2-year average.")
 
+    # ---------- completed/outstanding map ----------
+    servicing_map_df = nsc_df[nsc_df["Serial Number"].isin(scheduled_serials)].copy()
+
+    def classify_servicing(serial_number):
+        if serial_number in on_time_serials:
+            return "Completed"
+        else:
+            return "Outstanding"
+
+    servicing_map_df["Category"] = servicing_map_df["Serial Number"].apply(classify_servicing)
+
+    # ---------- completed/outstanding tables ----------
+    completed_display_df = servicing_map_df[servicing_map_df["Category"] == "Completed"]
+    outstanding_display_df = servicing_map_df[servicing_map_df["Category"] == "Outstanding"]
+
+    if len(completed_display_df) > 0:
+        with st.expander(f"View {len(completed_display_df)} Completed Service(s)"):
+            st.dataframe(completed_display_df[["Serial Number", "Asset Type", "Store Name", "Suburb", "State"]])
+    else:
+        st.info("No completed services this month.")
+
+    if len(outstanding_display_df) > 0:
+        with st.expander(f"View {len(outstanding_display_df)} Outstanding Service(s)"):
+            st.dataframe(outstanding_display_df[["Serial Number", "Asset Type", "Store Name", "Suburb", "State"]])
+    else:
+        st.success("No outstanding services this month.")
+
     st.write("")
+    st.write("")
+    st.write("")
+
+    colA, colSpacer, colB = st.columns([4, 1, 5])
 
     # ---------- on-time trend line chart ----------
     with colA:
@@ -899,17 +996,9 @@ elif section == "Planned Servicing":
         state_fig.update_layout(height=220, margin={"l":0,"r":0,"t":40,"b":0}, xaxis_title=None, yaxis_title=None)
         st.plotly_chart(state_fig, use_container_width=True)
 
-    # ---------- completed/outstanding map ----------
-    servicing_map_df = nsc_df[nsc_df["Serial Number"].isin(scheduled_serials)].copy()
-
-    def classify_servicing(serial_number):
-        if serial_number in on_time_serials:
-            return "Completed"
-        else:
-            return "Outstanding"
-
-    servicing_map_df["Category"] = servicing_map_df["Serial Number"].apply(classify_servicing)
-
+    st.write("")
+    st.write("")
+    st.write("")
 
     st.divider()
 
@@ -932,23 +1021,9 @@ elif section == "Planned Servicing":
         legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
     )
     servicing_fig.update_traces(marker=dict(size=10))
+    style_map(servicing_fig, dark_maps)
     st.plotly_chart(servicing_fig, use_container_width=True)
 
-    # ---------- completed/outstanding tables ----------
-    completed_display_df = servicing_map_df[servicing_map_df["Category"] == "Completed"]
-    outstanding_display_df = servicing_map_df[servicing_map_df["Category"] == "Outstanding"]
-
-    if len(completed_display_df) > 0:
-        with st.expander(f"View {len(completed_display_df)} Completed Service(s)"):
-            st.dataframe(completed_display_df[["Serial Number", "Asset Type", "Store Name", "Suburb", "State"]])
-    else:
-        st.info("No completed services this month.")
-
-    if len(outstanding_display_df) > 0:
-        with st.expander(f"View {len(outstanding_display_df)} Outstanding Service(s)"):
-            st.dataframe(outstanding_display_df[["Serial Number", "Asset Type", "Store Name", "Suburb", "State"]])
-    else:
-        st.success("No outstanding services this month.")
 
 
 
@@ -1087,7 +1162,19 @@ elif section == "Breakdowns-Balers":
     else:
         st.success("No repeat breakdowns or high-cost repairs flagged this month.")
 
-    st.divider()
+
+    # ---------- breakdown details dropdown ----------
+    with st.expander(f"View {len(this_month_breakdowns)} baler breakdown(s) this month"):
+        breakdown_display = this_month_breakdowns[[
+            "Invoice Number", "Invoice Date", "Store Reference", "Store Name",
+            "Asset Serial Number", "Service Description", "Amount (AUD)"
+        ]].sort_values("Invoice Date").copy()
+        breakdown_display["Invoice Date"] = breakdown_display["Invoice Date"].dt.date
+        st.dataframe(breakdown_display)
+
+    st.write("")
+    st.write("")
+    st.write("")
 
     colA, colSpacer, colB = st.columns([4, 1, 5])
 
@@ -1150,16 +1237,9 @@ elif section == "Breakdowns-Balers":
         title=dict(text="This Month's Baler Breakdowns - Locations", x=0.5, xanchor="center"),
         margin={"r":40,"t":50,"l":0,"b":0}, height=450,
     )
+    style_map(map_fig, dark_maps)
     st.plotly_chart(map_fig, use_container_width=True)
 
-    # ---------- breakdown details dropdown ----------
-    with st.expander(f"View {len(this_month_breakdowns)} baler breakdown(s) this month"):
-        breakdown_display = this_month_breakdowns[[
-            "Invoice Number", "Invoice Date", "Store Reference", "Store Name",
-            "Asset Serial Number", "Service Description", "Amount (AUD)"
-        ]].sort_values("Invoice Date").copy()
-        breakdown_display["Invoice Date"] = breakdown_display["Invoice Date"].dt.date
-        st.dataframe(breakdown_display)
 
 
 
@@ -1298,7 +1378,18 @@ elif section == "Breakdowns-Compactors":
     else:
         st.success("No repeat breakdowns or high-cost repairs flagged this month.")
 
-    st.divider()
+    # ---------- breakdown details dropdown ----------
+    with st.expander(f"View {len(this_month_breakdowns)} compactor breakdown(s) this month"):
+        breakdown_display = this_month_breakdowns[[
+            "Invoice Number", "Invoice Date", "Store Reference", "Store Name",
+            "Asset Serial Number", "Service Description", "Amount (AUD)"
+        ]].sort_values("Invoice Date").copy()
+        breakdown_display["Invoice Date"] = breakdown_display["Invoice Date"].dt.date
+        st.dataframe(breakdown_display)
+
+    st.write("")
+    st.write("")
+    st.write("")
 
     colA, colSpacer, colB = st.columns([4, 1, 5])
 
@@ -1361,16 +1452,9 @@ elif section == "Breakdowns-Compactors":
         title=dict(text="This Month's Compactor Breakdowns - Locations", x=0.5, xanchor="center"),
         margin={"r":40,"t":50,"l":0,"b":0}, height=450,
     )
+    style_map(map_fig, dark_maps)
     st.plotly_chart(map_fig, use_container_width=True)
 
-    # ---------- breakdown details dropdown ----------
-    with st.expander(f"View {len(this_month_breakdowns)} compactor breakdown(s) this month"):
-        breakdown_display = this_month_breakdowns[[
-            "Invoice Number", "Invoice Date", "Store Reference", "Store Name",
-            "Asset Serial Number", "Service Description", "Amount (AUD)"
-        ]].sort_values("Invoice Date").copy()
-        breakdown_display["Invoice Date"] = breakdown_display["Invoice Date"].dt.date
-        st.dataframe(breakdown_display)
 
 
 
@@ -1393,6 +1477,22 @@ elif section == "Predictive Capex":
             "- Forecasts both proactive planned replacements and reactive unplanned breakdown spend for the next 12 months\n"
             "- Units are flagged as high risk based on their age, location and breakdown history"
         )
+
+    # ---------- how this is calculated explainer ----------
+    with st.expander("How this forecast is calculated"):
+        st.markdown("""
+        **Reactive (unplanned)** - predicts next year's breakdown spend per asset, based on:
+        - Age and asset type
+        - Location (metro vs regional)
+        - Recent breakdown history
+
+        **Proactive (planned)** - flags assets for replacement when **both**:
+        - Age is near/past typical design life
+        - Total lifetime breakdown spend to date has reached 50%+ of what a new unit would cost
+
+        Also catches young "lemons" - flagged separately, since these usually need a
+        warranty conversation, not a routine replacement.
+        """)
 
     st.divider()
 
@@ -1479,25 +1579,10 @@ elif section == "Predictive Capex":
 
     col1, col2 = st.columns(2)
 
-    # ---------- how this is calculated explainer ----------
-    with st.expander("How this forecast is calculated"):
-        st.markdown("""
-        **Reactive (unplanned)** - predicts next year's breakdown spend per asset, based on:
-        - Age and asset type
-        - Location (metro vs regional)
-        - Recent breakdown history
-
-        **Proactive (planned)** - flags assets for replacement when **both**:
-        - Age is near/past typical design life
-        - Total lifetime breakdown spend to date has reached 50%+ of what a new unit would cost
-
-        Also catches young "lemons" - flagged separately, since these usually need a
-        warranty conversation, not a routine replacement.
-        """)
 
     # ---------- proactive/reactive metrics + recommended replacements dropdown ----------
     col1.metric("Proactive (planned)", f"${proactive_capex_forecast:,.0f}")
-    st.write("")
+
     high_risk_display = predict_df[predict_df["Predicted High Risk"]].copy()
     high_risk_display["Cumulative Breakdown Spend ($)"] = (
         high_risk_display["Cumulative Breakdown Spend as % of Replacement Cost"] / 100
@@ -1514,15 +1599,31 @@ elif section == "Predictive Capex":
     }).sort_values("% of Replacement Cost", ascending=False)
     high_risk_display["Age (yrs)"] = high_risk_display["Age (yrs)"].round(1)
 
+    st.divider()
+
+    young_high_spend = high_risk_display[high_risk_display["Age (yrs)"] < 5]
+    if len(young_high_spend) > 0:
+        flagged_list = ", ".join(
+            f"{row['Serial Number']} ({row['Asset Type']}, {row['Store Name']})"
+            for _, row in young_high_spend.iterrows()
+        )
+        st.warning(
+            f"⚠️ {len(young_high_spend)} unit(s) flagged as under 5 years old (young lemon) - likely chronic reliability issues rather than routine end-of-life,  \n"
+            "worth escalating separately (e.g. manufacturer warranty claim) rather than routine replacement.\n\n"
+            f"Flagged: {flagged_list}"
+        )
+
+    st.divider()
+
     with st.expander(f"View {len(high_risk_display)} recommended replacement(s)"):
         st.dataframe(high_risk_display)
-        young_high_spend = high_risk_display[high_risk_display["Age (yrs)"] < 5]
-        if len(young_high_spend) > 0:
-            st.warning(f"⚠️ {len(young_high_spend)} unit(s) flagged despite being under 5 years old - likely chronic reliability issues rather than routine end-of-life, worth escalating separately (e.g. manufacturer warranty claim) rather than routine replacement.")
     col2.metric("Reactive (unplanned)", f"${reactive_capex_forecast:,.0f}")
 
     # ---------- capex by state bar chart ----------
     st.write("")
+    st.write("")
+    st.write("")
+
     proactive_by_state = high_risk_display.groupby("State")["Replacement Cost"].sum().reset_index()
     proactive_by_state["Type"] = "Proactive"
     proactive_by_state = proactive_by_state.rename(columns={"Replacement Cost": "Capex"})
@@ -1539,6 +1640,8 @@ elif section == "Predictive Capex":
     )
     state_capex_fig.update_layout(height=350, margin={"l":0,"r":0,"t":40,"b":0}, yaxis_title="$")
     st.plotly_chart(state_capex_fig, use_container_width=True)
+
+    st.divider()
 
     # ---------- recommended replacements map ----------
     st.write("")
@@ -1564,4 +1667,5 @@ elif section == "Predictive Capex":
         legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top")
     )
     capex_map_fig.update_traces(marker=dict(size=10))
+    style_map(capex_map_fig, dark_maps)
     st.plotly_chart(capex_map_fig, use_container_width=True)
