@@ -243,11 +243,11 @@ if section == "About Us":
 
     with photo_col:
         with st.container(key="about_photos"):
-            baler_col, compactor_col = st.columns(2)
-            with baler_col:
-                st.image("assets/baler_image.png", caption="Baler", width=200)
-            with compactor_col:
-                st.image("assets/compactor_image.png", caption="Compactor", width=320)
+            baler_col, compactor_col = st.columns([1, 1.8])
+        with baler_col:
+            st.image("assets/baler_image.png", caption="Baler", use_container_width=True)
+        with compactor_col:
+            st.image("assets/compactor_image.png", caption="Compactor", use_container_width=True)
 
     st.markdown("""
         <style>
